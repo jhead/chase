@@ -1,6 +1,5 @@
 import styled from "@emotion/styled";
-import React, { useContext, useEffect } from "react";
-import { PropsWithChildren, ReactNode, useState } from "react";
+import React, { PropsWithChildren, useContext, useState } from "react";
 
 type DragContext = {
   width: number;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import "./App.css";
 
 import { ChaserMap } from "./components/ChaserMap";
@@ -28,7 +28,7 @@ function App() {
       <WithChasers>
         <ResizablePanes initialWidth={width}>
           <ResizablePane.Left>
-            <ChaserVideoGrid onSelect={setChaser} />
+            <ChaserVideoGrid onHover={() => {}} onSelect={setChaser} />
           </ResizablePane.Left>
           {!disableMap ? (
             <ResizablePane.Right>

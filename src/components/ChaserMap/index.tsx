@@ -1,6 +1,6 @@
 import { PropsOf } from "@emotion/react";
 import styled from "@emotion/styled";
-import L, { latLngBounds } from "leaflet";
+import { latLngBounds } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   PropsWithChildren,
@@ -39,7 +39,7 @@ const DynamicPopup: React.FC<PropsWithChildren<PopupProps>> = ({
   ...extraProps
 }) => {
   const map = useMap();
-  const ref = useRef<L.Popup>();
+  const ref = useRef<any>();
 
   useEffect(() => {
     if (!ref.current) return;
