@@ -7,7 +7,7 @@ export type AppContext = {
 };
 
 export const DefaultAppContext: AppContext = {
-  onlyShowOnline: false,
+  onlyShowOnline: true,
 };
 
 export const AppContext = React.createContext<AppContext>(DefaultAppContext);

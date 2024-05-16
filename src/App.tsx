@@ -8,6 +8,7 @@ import { WithChasers } from "./ctx/ChasersContext";
 import { Chaser } from "./services/chasers";
 
 import { ResizablePane, ResizablePanes } from "./components/ResizablePanes";
+import { Radar } from "./components/Radar/Radar";
 
 const disableMap = window.location.search.indexOf("nomap") >= 0;
 console.log(window.location.search, disableMap);
@@ -22,6 +23,14 @@ function App() {
       activeChaser: chaser?.properties?.id,
     });
   };
+
+  if (window.location.search.indexOf("radar") >= 0) {
+    return (
+      <>
+        <Radar />
+      </>
+    );
+  }
 
   return (
     <AppContext.Provider value={appContext}>
