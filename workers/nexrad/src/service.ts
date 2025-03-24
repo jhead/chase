@@ -2,11 +2,11 @@ import { Level2Radar } from "nexrad-level-2-data";
 import * as AWS from "@aws-sdk/client-s3";
 import { ListObjectsV2Output } from "@aws-sdk/client-s3";
 
-export const NOAA_LEVEL2_BUCKET = "https://noaa-nexrad-level2.s3.amazonaws.com";
+export const NOAA_LEVEL2_BUCKET = "noaa-nexrad-level2";
 
 export default class RadarService {
   constructor(
-    private readonly baseUrl: string = NOAA_LEVEL2_BUCKET,
+    private readonly bucket: string = NOAA_LEVEL2_BUCKET,
     private readonly cache: Cache = NoCache
   ) {}
 
@@ -38,7 +38,11 @@ export default class RadarService {
 
     const rawData = await measure(
       "fetch-frame",
-      async () => await fetchWithCache(`${this.baseUrl}/${frame}`, cache)
+      async () =>
+        await fetchWithCache(
+          `http://localhost:8787/s3/${this.bucket}/${frame}`,
+          cache
+        )
     );
 
     const radar = measure("radar", () => new Level2Radar(Buffer.from(rawData)));
@@ -78,7 +82,7 @@ export default class RadarService {
 
     do {
       const res = await this.s3.listObjectsV2({
-        Bucket: "noaa-nexrad-level2",
+        Bucket: this.bucket,
         Prefix: `${date}/${radar}`,
         MaxKeys: 1000,
         ContinuationToken: continuationToken,

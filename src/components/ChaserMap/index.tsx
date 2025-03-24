@@ -12,6 +12,8 @@ import {
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import { AppContext } from "../../ctx/AppContext";
 import { ChasersContext } from "../../ctx/ChasersContext";
+import L from "leaflet";
+import { RADAR_SITES } from "../../data/radarSites";
 
 export type Coordinate = {
   lat: number;
@@ -23,6 +25,12 @@ export type MarkerData = {
   label: string;
   coordinate: Coordinate;
   isActive?: boolean;
+};
+
+export type RadarSite = {
+  id: string;
+  name: string;
+  coordinate: Coordinate;
 };
 
 const StyledPopup = styled(Popup)`
@@ -58,7 +66,33 @@ const DynamicPopup: React.FC<PropsWithChildren<PopupProps>> = ({
   );
 };
 
-export const ChaserMap: React.FC = () => {
+// Custom icon for radar sites
+const radarIcon = new L.Icon({
+  iconUrl:
+    "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDQwIDQwIj48Y2lyY2xlIGN4PSIyMCIgY3k9IjIwIiByPSIxOCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDA2NmZmIiBzdHJva2Utd2lkdGg9IjMiLz48Y2lyY2xlIGN4PSIyMCIgY3k9IjIwIiByPSIxMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDA2NmZmIiBzdHJva2Utd2lkdGg9IjMiLz48Y2lyY2xlIGN4PSIyMCIgY3k9IjIwIiByPSI2IiBmaWxsPSIjMDA2NmZmIiBzdHJva2Utd2lkdGg9IjMiLz48L3N2Zz4=",
+  iconSize: [40, 40],
+  iconAnchor: [20, 20],
+  popupAnchor: [0, -20],
+});
+
+// Custom icon for selected radar sites
+const selectedRadarIcon = new L.Icon({
+  iconUrl:
+    "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDQwIDQwIj48Y2lyY2xlIGN4PSIyMCIgY3k9IjIwIiByPSIxOCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBmZjAwIiBzdHJva2Utd2lkdGg9IjMiLz48Y2lyY2xlIGN4PSIyMCIgY3k9IjIwIiByPSIxMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDBmZjAwIiBzdHJva2Utd2lkdGg9IjMiLz48Y2lyY2xlIGN4PSIyMCIgY3k9IjIwIiByPSI2IiBmaWxsPSIjMDBmZjAwIiBzdHJva2Utd2lkdGg9IjMiLz48L3N2Zz4=",
+  iconSize: [40, 40],
+  iconAnchor: [20, 20],
+  popupAnchor: [0, -20],
+});
+
+export type ChaserMapProps = {
+  selectedRadar: RadarSite | null;
+  onRadarSelect: (radar: RadarSite | null) => void;
+};
+
+export const ChaserMap: React.FC<ChaserMapProps> = ({
+  selectedRadar,
+  onRadarSelect,
+}) => {
   const { activeChaser } = useContext(AppContext);
   const { chasers } = useContext(ChasersContext);
   const [markers, setMarkers] = useState<MarkerData[]>([]);
@@ -78,10 +112,21 @@ export const ChaserMap: React.FC = () => {
     setMarkers(markers);
   }, [chasers, activeChaser]);
 
-  return <MapComponent markers={markers} />;
+  return (
+    <MapComponent
+      markers={markers}
+      selectedRadar={selectedRadar}
+      onRadarSelect={onRadarSelect}
+    />
+  );
 };
 
-const MapUpdater: React.FC<MapProps> = ({ markers, shouldRecenter }) => {
+type MapUpdaterProps = {
+  markers: MarkerData[];
+  shouldRecenter?: boolean;
+};
+
+const MapUpdater: React.FC<MapUpdaterProps> = ({ markers, shouldRecenter }) => {
   const [hasLoaded, setLoaded] = useState(false);
   const map = useMap();
 
@@ -114,14 +159,22 @@ const MapUpdater: React.FC<MapProps> = ({ markers, shouldRecenter }) => {
 export type MapProps = {
   markers: MarkerData[];
   shouldRecenter?: boolean;
+  selectedRadar: RadarSite | null;
+  onRadarSelect: (radar: RadarSite | null) => void;
 };
 
 export const MapComponent: React.FC<MapProps> = ({
   markers,
   shouldRecenter,
+  selectedRadar,
+  onRadarSelect,
 }) => {
+  const handleRadarClick = (site: RadarSite) => {
+    onRadarSelect(site);
+  };
+
   return (
-    <MapContainer center={[0, 0]} style={{ height: "400px", width: "100%" }}>
+    <MapContainer center={[0, 0]} style={{ height: "50%", width: "100%" }}>
       <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
       {markers.map((marker) => (
         <Marker
@@ -129,6 +182,24 @@ export const MapComponent: React.FC<MapProps> = ({
           position={[marker.coordinate.lat, marker.coordinate.lng]}
         >
           <DynamicPopup isActive={marker.isActive}>{marker.label}</DynamicPopup>
+        </Marker>
+      ))}
+      {RADAR_SITES.map((site) => (
+        <Marker
+          key={site.id}
+          position={[site.coordinate.lat, site.coordinate.lng]}
+          icon={selectedRadar?.id === site.id ? selectedRadarIcon : radarIcon}
+          eventHandlers={{
+            click: () => handleRadarClick(site),
+          }}
+        >
+          <DynamicPopup>
+            <div>
+              <strong>{site.name}</strong>
+              <br />
+              ID: {site.id}
+            </div>
+          </DynamicPopup>
         </Marker>
       ))}
       <MapUpdater markers={markers} shouldRecenter={shouldRecenter} />

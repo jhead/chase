@@ -149,4 +149,25 @@ export default class RadarCanvas {
     const numLinesLoc = gl.getUniformLocation(program, "uNumLines");
     gl.uniform1f(numLinesLoc, 720);
   }
+
+  handleResize(width: number, height: number) {
+    const { gl, canvas } = this;
+
+    // Update canvas size
+    canvas.width = width;
+    canvas.height = height;
+
+    // Update viewport
+    gl.viewport(0, 0, width, height);
+
+    // Update resolution uniform
+    const resolutionLocation = gl.getUniformLocation(
+      this.program,
+      "uResolution"
+    );
+    gl.uniform2f(resolutionLocation, width, height);
+
+    // Re-render
+    this.render();
+  }
 }

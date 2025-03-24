@@ -1,10 +1,9 @@
 import RadarService, { NOAA_LEVEL2_BUCKET, fetchWithCache } from "./service";
 
 const corsHeaders = (request: Request): Record<string, string> => ({
-  "access-control-allow-origin": request.headers.get("origin") as string,
-  "access-control-allow-headers": request.headers.get(
-    "Access-Control-Request-Headers"
-  ) as string,
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers": "*",
+  "access-control-allow-methods": "GET, OPTIONS",
 });
 
 const cors = async (request: Request): Promise<Response> =>
@@ -14,19 +13,40 @@ const cors = async (request: Request): Promise<Response> =>
 
 const proxyRoute = async (request: Request, env: Env): Promise<Response> => {
   const match = request.url.match(/s3\/(?<bucket>[^/]+)\/(?<rest>.*)/);
-  if (!match) return Response.json("error");
+  if (!match?.groups)
+    return Response.json({ error: "Invalid URL format" }, { status: 400 });
 
   const { bucket, rest } = match.groups;
-  console.log(bucket, rest);
+  console.log("Proxying request to S3:", { bucket, rest });
 
-  const res = await fetchWithCache(
-    `https://${bucket}.s3.amazonaws.com/${rest}`,
-    env.cache
-  );
+  const url = `https://${bucket}.s3.amazonaws.com/${rest}`;
+  console.log("Fetching from:", url);
 
-  return new Response(res, {
-    headers: corsHeaders(request),
-  });
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`S3 request failed: ${res.status} ${res.statusText}`);
+    }
+    const data = await res.arrayBuffer();
+    return new Response(data, {
+      headers: {
+        ...corsHeaders(request),
+        "content-type":
+          res.headers.get("content-type") || "application/octet-stream",
+      },
+    });
+  } catch (error: unknown) {
+    console.error("Error proxying to S3:", error);
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+    return Response.json(
+      { error: errorMessage },
+      {
+        status: 500,
+        headers: corsHeaders(request),
+      }
+    );
+  }
 };
 
 const radarRoute = async (request: Request, env: Env): Promise<Response> => {
@@ -35,13 +55,26 @@ const radarRoute = async (request: Request, env: Env): Promise<Response> => {
   const radarName = params.get("radar") || "KHTX";
   const date = params.get("date") || "2024/05/16";
 
-  console.log(date, radarName, frameIndex);
+  console.log("Radar request:", { date, radarName, frameIndex });
   const service = new RadarService(NOAA_LEVEL2_BUCKET, env.cache);
 
-  const output = await service.getRadialData(date, radarName, frameIndex);
-  return Response.json(output, {
-    headers: corsHeaders(request),
-  });
+  try {
+    const output = await service.getRadialData(date, radarName, frameIndex);
+    return Response.json(output, {
+      headers: corsHeaders(request),
+    });
+  } catch (error: unknown) {
+    console.error("Error processing radar request:", error);
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+    return Response.json(
+      { error: errorMessage },
+      {
+        status: 500,
+        headers: corsHeaders(request),
+      }
+    );
+  }
 };
 
 export default {
@@ -50,7 +83,7 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<Response> {
-    console.log(request.method);
+    console.log("Worker request:", request.method, request.url);
 
     // CORS
     if (request.method === "OPTIONS") return cors(request);
