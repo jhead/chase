@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import RadarCanvas from "./RadarCanvas";
+import RadarWebWorker from "../../../workers/nexrad/src/webworker.ts?worker";
 
 type RadarRes = {
   rays: RadarRay[];
@@ -31,19 +32,7 @@ const radarOptions = {
 };
 
 const parseRadarData = (data: RadarRes): number[] => {
-  const buffer = new Float32Array(numGates * numRays);
-
   data.rays.sort((a, b) => a.azimuth - b.azimuth);
-  console.log(data.rays.map(({ azimuth }) => azimuth));
-
-  // data.rays.forEach((ray, rayIndex) => {
-  //   const az = data.azs[rayIndex];
-
-  //   console.log(, rayIndex, ray);
-  //   ray.moment_data.forEach((gate, gateOffset) => {
-  //     // const index = (i * numRays) + gateOffset;
-  //   });
-  // });
 
   const output: number[] = [];
   for (let iRay = 0; iRay < numRays; iRay++) {
@@ -64,12 +53,41 @@ const parseRadarData = (data: RadarRes): number[] => {
   return output;
 };
 
+const getDataOld = async (frame: number): Promise<RadarRes> => {
+  return fetch(
+    `http://localhost:8787/?date=2024/05/19&radar=KDDC&frame=${frame}`
+  )
+    .then((res) => res.json())
+    .then((res) => JSON.parse(res));
+};
+
 const getData = async (frame: number): Promise<RadarRes> => {
-  const res = await fetch(
-    `http://localhost:8787?gates=${numGates}&frame=${frame}`
+  const worker = new RadarWebWorker();
+
+  worker.postMessage(
+    JSON.stringify({
+      date: "2024/05/19",
+      radarName: "KDDC",
+      frameIndex: frame,
+    })
   );
 
-  return await res.json();
+  return new Promise((resolve, reject) => {
+    const ref = setTimeout(() => {
+      reject(new Error("worker timeout"));
+    }, 60000);
+
+    worker.onmessage = (msg) => {
+      clearTimeout(ref);
+      try {
+        resolve(JSON.parse(msg.data));
+      } catch (err) {
+        reject(err);
+      }
+    };
+  }).finally(() => {
+    worker.terminate();
+  });
 };
 
 const loadRadarData = async (
@@ -77,10 +95,15 @@ const loadRadarData = async (
   numFrames: number = 10
 ): Promise<RadarRes[]> => {
   const framePromises = Array.from({ length: numFrames }).map((_, i) =>
-    getData(i + offset)
+    getData(i + offset).catch((err) => {
+      console.log(`skipping frame ${i} due to error`, err);
+      return [];
+    })
   );
 
-  return Promise.all(framePromises);
+  const frames = (await Promise.all(framePromises)).flat();
+  console.log(`got ${frames.length} total frames`);
+  return frames;
 };
 
 type RadarTextureData = number[];
@@ -90,7 +113,7 @@ export const Radar = () => {
   const [radarData, setRadarData] = useState<RadarTextureData[]>([]);
   const [canvas, setCanvas] = useState<RadarCanvas | null>(null);
 
-  const size = { width: 500, height: 500 };
+  const size = { width: 4000, height: 4000 };
 
   useEffect(() => {
     if (ref.current) {
@@ -100,7 +123,10 @@ export const Radar = () => {
 
       loadRadarData()
         .then((datas) => datas.map(parseRadarData))
-        .then(setRadarData);
+        .then((datas) => {
+          datas.reverse();
+          setRadarData((prev) => [...datas, ...prev]);
+        });
 
       const newCanvas = new RadarCanvas(ref.current, radarOptions);
       newCanvas.initCanvas();
@@ -113,39 +139,37 @@ export const Radar = () => {
   }, [ref]);
 
   useEffect(() => {
+    let isActive = true;
+
     if (ref.current && canvas) {
       console.log("updated radar data", radarData);
-      // canvas.setRadarData((array) => {
-      //   array.set(radarData);
-      // });
 
       let frameCounter = 0;
-      const inter = setInterval(() => {
+      const advanceFrame = () => {
+        if (!isActive) return;
+
         const frameIndex = frameCounter % radarData.length;
         const frameData = radarData[frameIndex];
 
+        console.log("advance frame", frameIndex);
         canvas.setRadarData((array) => {
           array.set(frameData);
         });
 
         frameCounter++;
-      }, 100);
 
+        const delay = frameIndex === radarData.length - 1 ? 1000 : 100;
+        setTimeout(() => {
+          requestAnimationFrame(advanceFrame);
+        }, delay);
+      };
+
+      advanceFrame();
       return () => {
-        clearInterval(inter);
+        isActive = false;
       };
     }
   }, [radarData]);
 
-  return (
-    <canvas
-      ref={ref}
-      width={size.width}
-      height={size.height}
-      style={{
-        width: size.width,
-        height: size.height,
-      }}
-    ></canvas>
-  );
+  return <canvas ref={ref} width={size.width} height={size.height}></canvas>;
 };

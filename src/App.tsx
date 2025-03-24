@@ -1,6 +1,7 @@
 import { useState } from "react";
 import "./App.css";
 
+import { Map } from "./components/Map";
 import { ChaserMap } from "./components/ChaserMap";
 import { ChaserVideoGrid } from "./components/ChaserVideoGrid";
 import { AppContext, DefaultAppContext } from "./ctx/AppContext";
@@ -32,6 +33,14 @@ function App() {
     );
   }
 
+  if (window.location.search.indexOf("map") >= 0) {
+    return (
+      <>
+        <Map />
+      </>
+    );
+  }
+
   return (
     <AppContext.Provider value={appContext}>
       <WithChasers>
@@ -42,6 +51,7 @@ function App() {
           {!disableMap ? (
             <ResizablePane.Right>
               <ChaserMap />
+              <Radar />
             </ResizablePane.Right>
           ) : null}
         </ResizablePanes>

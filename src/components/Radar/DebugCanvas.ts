@@ -1,5 +1,5 @@
 import vertexShaderSource from "./vertex.glsl?raw";
-import fragmentShaderSource from "./fragment.glsl?raw";
+import fragmentShaderSource from "./debugFragment.glsl?raw";
 import { QuadVertices, createProgram, createShader } from "./WebGL";
 
 export type RadarOptions = {
@@ -12,7 +12,7 @@ const defaultRadarOptions = {
   numGates: 2000,
 };
 
-export default class RadarCanvas {
+export default class DebugCanvas {
   private readonly gl: WebGL2RenderingContext;
   private readonly program: WebGLProgram;
 
@@ -37,8 +37,6 @@ export default class RadarCanvas {
     );
     const program = createProgram(gl, [vertexShader, fragmentShader]);
     gl.useProgram(program);
-
-    console.log("max textures", gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS));
 
     this.gl = gl;
     this.program = program;
@@ -73,8 +71,6 @@ export default class RadarCanvas {
       gl.FLOAT,
       this.radarData
     );
-
-    requestAnimationFrame(() => this.render());
   }
 
   destroy() {
@@ -87,11 +83,17 @@ export default class RadarCanvas {
   private render() {
     const { gl } = this;
 
-    if (!this.alive) return;
+    const renderLoop = () => {
+      if (!this.alive) return;
 
-    gl.clearColor(1.0, 1.0, 1.0, 1.0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.clearColor(1.0, 1.0, 1.0, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+      requestAnimationFrame(renderLoop);
+    };
+
+    renderLoop();
   }
 
   private initQuad() {
@@ -112,10 +114,8 @@ export default class RadarCanvas {
   private initRadarTexture() {
     const { gl, program } = this;
 
-    // Gates on x
-    // Rays on y
-
     const radarTexture = gl.createTexture();
+    gl.getExtension("OES_texture_float");
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, radarTexture);
     gl.texImage2D(
