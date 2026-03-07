@@ -1,8 +1,6 @@
 import { Level2Radar } from "nexrad-level-2-data";
-import * as AWS from "@aws-sdk/client-s3";
-import { ListObjectsV2Output } from "@aws-sdk/client-s3";
 
-export const NOAA_LEVEL2_BUCKET = "noaa-nexrad-level2";
+export const NOAA_LEVEL2_BUCKET = "unidata-nexrad-level2";
 
 export default class RadarService {
   constructor(
@@ -62,13 +60,6 @@ export default class RadarService {
     return output;
   }
 
-  private readonly s3 = new AWS.S3({
-    region: "us-east-1",
-    signer: { sign: async (request) => request },
-    endpoint: "http://localhost:8787/s3",
-    forcePathStyle: true,
-  });
-
   async listRadarFiles(date: string, radar: string): Promise<string[]> {
     const cacheKey = `${date}-${radar}-v6`;
     const cached = await this.cache.get(cacheKey);
@@ -77,32 +68,20 @@ export default class RadarService {
       return JSON.parse(cached);
     }
 
-    let contents: ListObjectsV2Output["Contents"] = [];
-    let continuationToken: string | undefined;
+    const prefix = `${date}/${radar}`;
+    const url = `http://localhost:8787/s3/${this.bucket}/?list-type=2&prefix=${prefix}&max-keys=1000`;
+    const res = await fetch(url);
+    const text = await res.text();
 
-    do {
-      const res = await this.s3.listObjectsV2({
-        Bucket: this.bucket,
-        Prefix: `${date}/${radar}`,
-        MaxKeys: 1000,
-        ContinuationToken: continuationToken,
-      });
-
-      continuationToken = res.ContinuationToken;
-      contents.push(...(res.Contents || []));
-    } while (continuationToken != null);
-
-    const keys = contents
-      .sort((a, b) => {
-        return b.LastModified!.getTime() - a.LastModified!.getTime();
-      })
-      .map((it) => `${it.Key}`);
+    const keys = [...text.matchAll(/<Key>([^<]+)<\/Key>/g)]
+      .map((m) => m[1])
+      .sort((a, b) => b.localeCompare(a));
 
     await this.cache.put(cacheKey, JSON.stringify(keys), {
       expirationTtl: 60,
     });
 
-    return keys || [];
+    return keys;
   }
 }
 
