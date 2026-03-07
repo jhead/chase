@@ -1,6 +1,5 @@
 import { PropsOf } from "@emotion/react";
 import styled from "@emotion/styled";
-import { latLngBounds } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   PropsWithChildren,
@@ -9,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
+import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 import { AppContext } from "../../ctx/AppContext";
 import { ChasersContext } from "../../ctx/ChasersContext";
 import L from "leaflet";
@@ -121,51 +120,14 @@ export const ChaserMap: React.FC<ChaserMapProps> = ({
   );
 };
 
-type MapUpdaterProps = {
-  markers: MarkerData[];
-  shouldRecenter?: boolean;
-};
-
-const MapUpdater: React.FC<MapUpdaterProps> = ({ markers, shouldRecenter }) => {
-  const [hasLoaded, setLoaded] = useState(false);
-  const map = useMap();
-
-  const recenter = () => {
-    const coords: [number, number][] = markers.map((m) => [
-      m.coordinate.lat,
-      m.coordinate.lng,
-    ]);
-
-    const bounds = latLngBounds(coords.length > 0 ? coords : [[0, 0]]);
-    map.fitBounds(bounds);
-  };
-
-  useEffect(() => {
-    // Skip if no markers yet
-    if (markers.length === 0) return;
-
-    if (!hasLoaded || shouldRecenter) {
-      recenter();
-    }
-
-    if (!hasLoaded) {
-      setLoaded(true);
-    }
-  }, [markers, map]);
-
-  return null;
-};
-
 export type MapProps = {
   markers: MarkerData[];
-  shouldRecenter?: boolean;
   selectedRadar: RadarSite | null;
   onRadarSelect: (radar: RadarSite | null) => void;
 };
 
 export const MapComponent: React.FC<MapProps> = ({
   markers,
-  shouldRecenter,
   selectedRadar,
   onRadarSelect,
 }) => {
