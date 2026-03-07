@@ -103,12 +103,14 @@ struct DataStatus {
 fn main() {
     let args = CliArgs::parse();
     let initial_mode = RenderMode::from_str(&args.mode);
+    let is_headless = args.output.is_some();
 
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "NEXRAD 3D Radar".into(),
                 resolution: (1400_u32, 900_u32).into(),
+                visible: !is_headless,
                 ..default()
             }),
             ..default()
