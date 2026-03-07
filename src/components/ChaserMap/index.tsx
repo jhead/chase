@@ -174,7 +174,7 @@ export const MapComponent: React.FC<MapProps> = ({
   };
 
   return (
-    <MapContainer center={[0, 0]} style={{ height: "50%", width: "100%" }}>
+    <MapContainer center={[39, -98]} zoom={4} style={{ height: "50%", width: "100%" }}>
       <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
       {markers.map((marker) => (
         <Marker
