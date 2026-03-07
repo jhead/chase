@@ -202,7 +202,6 @@ export const MapComponent: React.FC<MapProps> = ({
           </DynamicPopup>
         </Marker>
       ))}
-      <MapUpdater markers={markers} shouldRecenter={shouldRecenter} />
     </MapContainer>
   );
 };
