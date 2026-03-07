@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import { AppContext } from "../../ctx/AppContext";
 import { ChasersContext } from "../../ctx/ChasersContext";
 import L from "leaflet";
