@@ -1,0 +1,21 @@
+[package]
+name = "nexrad-3d"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-channel = "2.5.0"
+bevy = { version = "0.18.1", features = ["dynamic_linking"] }
+bevy_egui = "0.39.1"
+nexrad-data = "0.2.0"
+nexrad-decode = "0.1.2"
+nexrad-model = "0.1.0"
+reqwest = { version = "0.13.2", features = ["json"] }
+tokio = { version = "1.50.0", features = ["rt-multi-thread"] }
+
+# Faster incremental builds in dev
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

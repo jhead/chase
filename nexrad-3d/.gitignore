@@ -1,0 +1,30 @@
+# Rust/Cargo typical ignores
+/target/
+**/*.rs.bk
+
+# IDE/editor config
+/.idea/
+/.vscode/
+/*.code-workspace
+
+# Byproducts
+Cargo.lock
+**/*.log
+
+# Test output
+/coverage/
+/test-output/
+
+# MacOS
+.DS_Store
+
+# Node/npm (if any assets built)
+/node_modules/
+
+/assets/shaders/*.spv
+/assets/shaders/*.meta
+
+# Miscellaneous
+*.swp
+*.swo
+*.tmp
