@@ -4,46 +4,44 @@
 @group(3) @binding(0) var reflectivity_texture: texture_2d<f32>;
 @group(3) @binding(1) var reflectivity_sampler: sampler;
 
-// NWS reflectivity colormap — ported verbatim from fragment.glsl.
+// NWS Standard Reflectivity Color Table (approximate)
 // Input: normalized reflectivity in [0, 1] (where 1.0 ≈ 75 dBZ).
 fn nws_colormap(v: f32) -> vec3<f32> {
-    if v <= 0.0 {
+    if v <= 0.06 { // < 5 dBZ
         return vec3<f32>(0.0, 0.0, 0.0);
     }
 
-    var range_start: f32;
-    var range_end: f32;
-    var color_start: vec3<f32>;
-    var color_end: vec3<f32>;
+    let dbz = v * 75.0;
 
-    if v < 0.2 {
-        range_start = 0.0;
-        range_end   = 0.2;
-        color_start = vec3<f32>(0.0,  0.0,  0.0);
-        color_end   = vec3<f32>(0.2,  0.48, 0.55);
-    } else if v < 0.4 {
-        range_start = 0.2;
-        range_end   = 0.4;
-        color_start = vec3<f32>(0.07, 0.25, 0.04);
-        color_end   = vec3<f32>(0.15, 0.63, 0.2);
-    } else if v < 0.66 {
-        range_start = 0.4;
-        range_end   = 0.66;
-        color_start = vec3<f32>(1.0,  1.0,  0.0);
-        color_end   = vec3<f32>(1.0,  0.5,  0.0);
-    } else if v < 0.8 {
-        range_start = 0.66;
-        range_end   = 0.8;
-        color_start = vec3<f32>(1.0,  0.0,  0.0);
-        color_end   = vec3<f32>(0.37, 0.08, 0.08);
+    if dbz < 10.0 {
+        return vec3<f32>(0.0, 1.0, 1.0); // Cyan
+    } else if dbz < 15.0 {
+        return vec3<f32>(0.0, 0.0, 0.7); // Blue
+    } else if dbz < 20.0 {
+        return vec3<f32>(0.0, 0.0, 0.5); // Dark Blue
+    } else if dbz < 25.0 {
+        return vec3<f32>(0.0, 1.0, 0.0); // Green
+    } else if dbz < 30.0 {
+        return vec3<f32>(0.0, 0.8, 0.0); // Medium Green
+    } else if dbz < 35.0 {
+        return vec3<f32>(0.0, 0.6, 0.0); // Dark Green
+    } else if dbz < 40.0 {
+        return vec3<f32>(1.0, 1.0, 0.0); // Yellow
+    } else if dbz < 45.0 {
+        return vec3<f32>(1.0, 0.8, 0.0); // Dark Yellow
+    } else if dbz < 50.0 {
+        return vec3<f32>(1.0, 0.6, 0.0); // Orange
+    } else if dbz < 55.0 {
+        return vec3<f32>(1.0, 0.0, 0.0); // Red
+    } else if dbz < 60.0 {
+        return vec3<f32>(0.8, 0.0, 0.0); // Medium Red
+    } else if dbz < 65.0 {
+        return vec3<f32>(0.6, 0.0, 0.0); // Dark Red
+    } else if dbz < 70.0 {
+        return vec3<f32>(1.0, 0.0, 1.0); // Magenta
     } else {
-        range_start = 0.8;
-        range_end   = 1.0;
-        color_start = vec3<f32>(0.68, 0.43, 0.58);
-        color_end   = vec3<f32>(0.6,  0.0,  0.30);
+        return vec3<f32>(0.5, 0.0, 0.5); // Purple
     }
-
-    return mix(color_start, color_end, smoothstep(range_start, range_end, v));
 }
 
 @fragment

@@ -8,7 +8,10 @@ async-channel = "2.5.0"
 bevy = { version = "0.18.1", features = ["dynamic_linking"] }
 bevy_egui = "0.39.1"
 chrono = "0.4"
+clap = { version = "4.5", features = ["derive"] }
+lin_alg = "1.4.1"
 log = "0.4"
+mcubes = "0.1.7"
 nexrad-data = { version = "0.2.0", features = ["decode", "nexrad-model"] }
 nexrad-decode = "0.1.2"
 nexrad-model = "0.1.0"
