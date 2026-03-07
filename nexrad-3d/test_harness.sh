@@ -33,9 +33,11 @@ cargo run --quiet -- -s "$SITE" -m "$MODE" -o "$WORK_DIR/$IMAGE_NAME" > /dev/nul
 
 # Technical prompt for Gemini (file referenced by basename only)
 PROMPT="@$IMAGE_NAME Technical review of this NEXRAD 3D $MODE render.
-Analyze: 1. Structural integrity (aliasing, gaps between tilts, blurring quality).
+The image is a 2x2 grid of 4 simultaneous camera views (top-left: NE perspective, top-right: top-down, bottom-left: south side, bottom-right: east side).
+Analyze each panel: 1. Structural integrity (aliasing, gaps between tilts, blurring quality).
 2. Color mapping accuracy (reflectivity thresholds vs NWS scale).
 3. Artifacts (voxelization, mesh manifold issues).
+4. Cross-view consistency (shape and extent look correct from all 4 angles).
 Keep response brief, precise, and plaintext. Avoid lists or markdown. $EXTRA_PROMPT"
 
 # Execute analysis via Gemini CLI inside the temp dir (sandbox restricts it to that dir)

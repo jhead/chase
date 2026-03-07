@@ -2,7 +2,7 @@ mod camera;
 mod nexrad;
 mod rendering;
 
-use bevy::{app::AppExit, light::GlobalAmbientLight, prelude::*, render::view::screenshot::{save_to_disk, Screenshot}, window::PrimaryWindow};
+use bevy::{app::AppExit, camera::Viewport, light::GlobalAmbientLight, prelude::*, render::view::screenshot::{save_to_disk, Screenshot}, window::PrimaryWindow};
 use camera::{orbit_camera::OrbitCamera, OrbitCameraPlugin};
 use clap::Parser;
 use nexrad::types::{ElevationScan, RadarVolume};
@@ -29,6 +29,11 @@ struct CliArgs {
     output: Option<String>,
 }
 
+/// Identifies which 2×2 quadrant a camera occupies (0=TL, 1=TR, 2=BL, 3=BR).
+/// A system reads the physical window size each frame and sets the viewport accordingly.
+#[derive(Component)]
+struct QuadrantCamera(usize);
+
 /// Marks entities that are part of the current radar volume so they can be
 /// despawned wholesale when new data arrives.
 #[derive(Component)]
@@ -44,10 +49,11 @@ struct RadarIsoSurface;
 struct RadarDataChannel(async_channel::Receiver<RadarVolume>);
 
 /// Channel used by worker threads to send derived isosurface mesh data.
+/// Sends all threshold surfaces in one batch (outermost to innermost).
 #[derive(Resource)]
 struct IsoSurfaceChannel {
-    tx: async_channel::Sender<IsoMeshData>,
-    rx: async_channel::Receiver<IsoMeshData>,
+    tx: async_channel::Sender<Vec<IsoMeshData>>,
+    rx: async_channel::Receiver<Vec<IsoMeshData>>,
 }
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +106,35 @@ struct DataStatus {
     exit_requested: bool,
 }
 
+/// Each frame, recompute every QuadrantCamera's viewport from the actual
+/// physical window size so the split is correct on HiDPI / Retina displays.
+fn update_quadrant_viewports(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut cameras: Query<(&QuadrantCamera, &mut Camera)>,
+) {
+    let Ok(window) = windows.single() else { return };
+    let phys_w = window.physical_width();
+    let phys_h = window.physical_height();
+    if phys_w == 0 || phys_h == 0 {
+        return;
+    }
+    let half_w = phys_w / 2;
+    let half_h = phys_h / 2;
+    for (quadrant, mut camera) in &mut cameras {
+        let pos = match quadrant.0 {
+            0 => UVec2::new(0,      0),
+            1 => UVec2::new(half_w, 0),
+            2 => UVec2::new(0,      half_h),
+            _ => UVec2::new(half_w, half_h),
+        };
+        camera.viewport = Some(Viewport {
+            physical_position: pos,
+            physical_size: UVec2::new(half_w, half_h),
+            ..default()
+        });
+    }
+}
+
 fn main() {
     let args = CliArgs::parse();
     let initial_mode = RenderMode::from_str(&args.mode);
@@ -125,6 +160,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                update_quadrant_viewports,
                 receive_radar_data,
                 receive_isosurface_data,
                 toggle_render_mode,
@@ -191,16 +227,40 @@ fn spawn_elevation_entities(
 fn setup(
     mut commands: Commands,
     mut global_ambient: ResMut<GlobalAmbientLight>,
+    args: Res<CliArgs>,
 ) {
-    let (iso_tx, iso_rx) = async_channel::unbounded::<IsoMeshData>();
+    let (iso_tx, iso_rx) = async_channel::unbounded::<Vec<IsoMeshData>>();
     commands.insert_resource(IsoSurfaceChannel {
         tx: iso_tx,
         rx: iso_rx,
     });
 
-    let orbit = OrbitCamera::default();
-    let transform = orbit.to_transform();
-    commands.spawn((Camera3d::default(), transform, orbit));
+    if args.output.is_some() {
+        // Screenshot mode: 4 static camera angles in a 2×2 grid.
+        // Viewports are set at runtime (see update_quadrant_viewports) so physical
+        // pixel coordinates are correct on both 1× and HiDPI/Retina displays.
+        let views: [(f32, f32); 4] = [
+            (0.3,                                   1.1), // TL: NE perspective
+            (0.0, std::f32::consts::FRAC_PI_2 - 0.01), // TR: top-down
+            (std::f32::consts::PI,                  0.8), // BL: south side
+            (std::f32::consts::FRAC_PI_2,           0.6), // BR: east side
+        ];
+        for (i, (yaw, pitch)) in views.iter().enumerate() {
+            let orbit = OrbitCamera { focus: Vec3::ZERO, radius: 400_000.0, yaw: *yaw, pitch: *pitch };
+            let transform = orbit.to_transform();
+            let camera = Camera { order: i as isize, ..default() };
+            if i == 0 {
+                commands.spawn((Camera3d::default(), camera, transform, orbit, QuadrantCamera(i)));
+            } else {
+                commands.spawn((Camera3d::default(), camera, transform, QuadrantCamera(i)));
+            }
+        }
+    } else {
+        // Interactive mode: single orbit camera (original behaviour).
+        let orbit = OrbitCamera::default();
+        let transform = orbit.to_transform();
+        commands.spawn((Camera3d::default(), transform, orbit));
+    }
 
     // Directional light for isosurface shading — angled from upper-left.
     commands.spawn((
@@ -289,9 +349,9 @@ fn receive_radar_data(
     let tx = iso_channel.tx.clone();
     let scans_for_iso = scans.clone();
     std::thread::spawn(move || {
-        if let Some(mesh_data) = rendering::isosurface::build_threshold_surface(&scans_for_iso, 25.0 / 75.0)
-        {
-            let _ = tx.try_send(mesh_data);
+        let surfaces = rendering::isosurface::build_threshold_surfaces(&scans_for_iso);
+        if !surfaces.is_empty() {
+            let _ = tx.try_send(surfaces);
         }
     });
 
@@ -312,7 +372,7 @@ fn receive_isosurface_data(
     mut iso_materials: ResMut<Assets<IsoSurfaceMaterial>>,
     mut status: ResMut<DataStatus>,
 ) {
-    let Ok(mesh_data) = iso_channel.rx.try_recv() else {
+    let Ok(surfaces) = iso_channel.rx.try_recv() else {
         return;
     };
 
@@ -320,21 +380,25 @@ fn receive_isosurface_data(
         commands.entity(entity).despawn();
     }
 
-    let mesh = mesh_data.into_mesh();
-    let material = iso_materials.add(IsoSurfaceMaterial {});
-    commands.spawn((
-        Mesh3d(meshes.add(mesh)),
-        MeshMaterial3d(material),
-        Transform::default(),
-        if mode.shows_isosurface() {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        },
-        RadarIsoSurface,
-    ));
+    let iso_visibility = if mode.shows_isosurface() {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
 
-    info!("derived isosurface mesh generated");
+    for mesh_data in surfaces {
+        let mesh = mesh_data.into_mesh();
+        let material = iso_materials.add(IsoSurfaceMaterial {});
+        commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(material),
+            Transform::default(),
+            iso_visibility,
+            RadarIsoSurface,
+        ));
+    }
+
+    info!("derived isosurface meshes generated");
     status.iso_loaded = true;
 }
 

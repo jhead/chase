@@ -35,6 +35,6 @@ impl Material for IsoSurfaceMaterial {
     }
 
     fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Opaque
+        AlphaMode::Blend
     }
 }
