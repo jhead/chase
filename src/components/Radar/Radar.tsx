@@ -112,6 +112,8 @@ const getData = async (
     date,
     radarName: radarSite.id,
     frameIndex: frame,
+    baseUrl:
+      import.meta.env.VITE_NEXRAD_API_URL || "http://localhost:8787",
   };
 
   console.log("Sending message to worker:", message);

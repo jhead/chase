@@ -2,11 +2,18 @@ import { Level2Radar } from "nexrad-level-2-data";
 
 export const NOAA_LEVEL2_BUCKET = "unidata-nexrad-level2";
 
+const DEFAULT_BASE_URL = "http://localhost:8787";
+
 export default class RadarService {
+  private readonly baseUrl: string;
+
   constructor(
     private readonly bucket: string = NOAA_LEVEL2_BUCKET,
-    private readonly cache: Cache = NoCache
-  ) {}
+    private readonly cache: Cache = NoCache,
+    baseUrl: string = DEFAULT_BASE_URL
+  ) {
+    this.baseUrl = baseUrl.replace(/\/$/, "");
+  }
 
   async getRadialData(
     date: string,
@@ -38,7 +45,7 @@ export default class RadarService {
       "fetch-frame",
       async () =>
         await fetchWithCache(
-          `http://localhost:8787/s3/${this.bucket}/${frame}`,
+          `${this.baseUrl}/s3/${this.bucket}/${frame}`,
           cache
         )
     );
@@ -69,7 +76,7 @@ export default class RadarService {
     }
 
     const prefix = `${date}/${radar}`;
-    const url = `http://localhost:8787/s3/${this.bucket}/?list-type=2&prefix=${prefix}&max-keys=1000`;
+    const url = `${this.baseUrl}/s3/${this.bucket}/?list-type=2&prefix=${prefix}&max-keys=1000`;
     const res = await fetch(url);
     const text = await res.text();
 

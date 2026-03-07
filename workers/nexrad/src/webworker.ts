@@ -6,6 +6,7 @@ type Message = {
   radarName: string;
   date: string;
   frameIndex: number;
+  baseUrl?: string;
 };
 
 declare const self: Worker;
@@ -13,11 +14,11 @@ const ctx: Worker = self;
 
 ctx.onmessage = (e: MessageEvent) => {
   console.log("Worker received message:", e.data);
-  const { radarName, date, frameIndex } = JSON.parse(
+  const { radarName, date, frameIndex, baseUrl } = JSON.parse(
     e.data as string
   ) as Message;
 
-  const service = new RadarService(NOAA_LEVEL2_BUCKET);
+  const service = new RadarService(NOAA_LEVEL2_BUCKET, undefined, baseUrl);
 
   service
     .getRadialData(date, radarName, frameIndex)
