@@ -17,6 +17,7 @@
     "earcut": "^3.0.2",
     "hls.js": "^1.5.8",
     "leaflet": "^1.9.4",
+    "nexrad-level-2-data": "^2.4.3",
     "pyodide": "^0.29.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
