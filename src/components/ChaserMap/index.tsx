@@ -47,7 +47,7 @@ const DynamicPopup: React.FC<PropsWithChildren<PopupProps>> = ({
   ...extraProps
 }) => {
   const map = useMap();
-  const ref = useRef<any>();
+  const ref = useRef<any>(undefined);
 
   useEffect(() => {
     if (!ref.current) return;

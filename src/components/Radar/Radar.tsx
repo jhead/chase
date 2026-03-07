@@ -155,24 +155,6 @@ const getData = async (
   });
 };
 
-const loadRadarData = async (
-  radarSite: RadarSite,
-  offset: number = 1,
-  numFrames: number = 10
-): Promise<RadarRes[]> => {
-  const framePromises = Array.from({ length: numFrames }).map((_, i) =>
-    getData(i + offset, radarSite).catch((err) => {
-      console.log(`skipping frame ${i} due to error`, err);
-      return null;
-    })
-  );
-
-  const frames = (await Promise.all(framePromises)).filter(
-    (frame): frame is RadarRes => frame !== null
-  );
-  console.log(`got ${frames.length} total frames`);
-  return frames;
-};
 
 const RadarContainer = styled.div`
   width: 100%;
@@ -275,7 +257,7 @@ export const Radar: React.FC<RadarProps> = ({ radarSite }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [frameInterval, setFrameInterval] = useState(DEFAULT_FRAME_INTERVAL);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number | undefined>(undefined);
   const lastFrameTimeRef = useRef<number>(0);
   const currentFrameIndex = useRef<number>(0);
   const [isFullyLoaded, setIsFullyLoaded] = useState(false);
