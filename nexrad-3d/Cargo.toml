@@ -7,7 +7,9 @@ edition = "2024"
 async-channel = "2.5.0"
 bevy = { version = "0.18.1", features = ["dynamic_linking"] }
 bevy_egui = "0.39.1"
-nexrad-data = "0.2.0"
+chrono = "0.4"
+log = "0.4"
+nexrad-data = { version = "0.2.0", features = ["decode", "nexrad-model"] }
 nexrad-decode = "0.1.2"
 nexrad-model = "0.1.0"
 reqwest = { version = "0.13.2", features = ["json"] }
