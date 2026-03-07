@@ -30,7 +30,7 @@ type RadarRay = {
 type RadarTextureData = {
   rays: RadarRay[];
   azs: number[];
-  rawData: number[];
+  rawData: Float32Array;
 };
 
 const numRays = 720;
@@ -80,7 +80,7 @@ const parseRadarData = (data: RadarRes): RadarTextureData => {
   return {
     rays,
     azs,
-    rawData: Array.from(output), // Convert Float32Array to regular array for caching
+    rawData: output,
   };
 };
 
@@ -357,36 +357,11 @@ export const Radar: React.FC<RadarProps> = ({ radarSite }) => {
     const cachedData = radarCache.get({ radarSite, date });
     if (cachedData) {
       console.log("Using cached radar data");
-      const parsedData = cachedData.frames.map((frame: number[]) => {
-        const rays: RadarRay[] = [];
-        const azs: number[] = [];
-        const rawData: number[] = [];
-
-        // Reconstruct the radar data structure
-        for (let i = 0; i < numRays; i++) {
-          const ray: RadarRay = {
-            block_type: "REF",
-            name: "REF",
-            spare: [],
-            gate_count: numGates,
-            first_gate: 0,
-            gate_size: 250,
-            rf_threshold: 0,
-            snr_threshold: 0,
-            control_flags: 0,
-            data_size: numGates,
-            scale: 1,
-            offset: 0,
-            moment_data: frame.slice(i * numGates, (i + 1) * numGates),
-            azimuth: (i * 360) / numRays,
-          };
-          rays.push(ray);
-          azs.push(ray.azimuth);
-          rawData.push(...ray.moment_data);
-        }
-
-        return { rays, azs, rawData };
-      });
+      const parsedData = cachedData.frames.map((frame: Float32Array) => ({
+        rays: [] as RadarRay[],
+        azs: [] as number[],
+        rawData: frame,
+      }));
       setRadarData(parsedData);
 
       // If we have all frames from cache, we're fully loaded
@@ -450,10 +425,7 @@ export const Radar: React.FC<RadarProps> = ({ radarSite }) => {
     if (canvas && radarData.length > 0) {
       const currentFrame = radarData[0]; // Use the first frame for now
       canvas.setRadarData((data: Float32Array) => {
-        // Copy the raw data into the Float32Array
-        for (let i = 0; i < currentFrame.rawData.length; i++) {
-          data[i] = currentFrame.rawData[i];
-        }
+        data.set(currentFrame.rawData);
       });
     }
   }, [canvas, radarData]);
@@ -469,10 +441,7 @@ export const Radar: React.FC<RadarProps> = ({ radarSite }) => {
         // Use the current frame index to get the correct frame
         const currentFrame = radarData[currentFrameIndex.current];
         canvas.setRadarData((data: Float32Array) => {
-          // Copy the raw data into the Float32Array
-          for (let i = 0; i < currentFrame.rawData.length; i++) {
-            data[i] = currentFrame.rawData[i];
-          }
+          data.set(currentFrame.rawData);
         });
 
         // Update frame index to move forward through the frames

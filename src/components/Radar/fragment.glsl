@@ -12,31 +12,34 @@ uniform float uNumLines;
 #define PI 3.14159265359
 
 vec3 scaleRadarColor(float radarValue) {
-    float rangeStart = 0.0;
-    float rangeEnd = 1.0;
-    vec3 colorStart = vec3(0.0, 0.0, 0.0);
-    vec3 colorEnd = vec3(1.0, 1.0, 1.0);
+    if (radarValue <= 0.0) return vec3(0.0, 0.0, 0.0);
 
-    if (radarValue  > 0.0 && radarValue < 0.2) {
+    float rangeStart;
+    float rangeEnd;
+    vec3 colorStart;
+    vec3 colorEnd;
+
+    if (radarValue < 0.2) {
+        rangeStart = 0.0;
         rangeEnd = 0.2;
         colorStart = vec3(0.0, 0.0, 0.0);
         colorEnd = vec3(0.2, 0.48, 0.55);
-    } else if (radarValue >= 0.2 && radarValue < 0.4) {
+    } else if (radarValue < 0.4) {
         rangeStart = 0.2;
         rangeEnd = 0.4;
-        colorStart = vec3(.15, .63, .2); // 40, 160, 50
-        colorEnd = vec3(0.07, .25, 0.04); 
-    } else if (radarValue >= 0.4 && radarValue < 0.66) {
+        colorStart = vec3(0.07, 0.25, 0.04);
+        colorEnd = vec3(0.15, 0.63, 0.2);
+    } else if (radarValue < 0.66) {
         rangeStart = 0.4;
-        rangeEnd = 0.6;
+        rangeEnd = 0.66;
         colorStart = vec3(1.0, 1.0, 0.0);
         colorEnd = vec3(1.0, 0.5, 0.0);
-    } else if (radarValue >= 0.66 && radarValue < 0.8) {
+    } else if (radarValue < 0.8) {
         rangeStart = 0.66;
         rangeEnd = 0.8;
         colorStart = vec3(1.0, 0.0, 0.0);
-        colorEnd = vec3(0.37, 0.08, 0.08);// 95, 20, 20
-    } else if (radarValue >= 0.8) {
+        colorEnd = vec3(0.37, 0.08, 0.08);
+    } else {
         rangeStart = 0.8;
         rangeEnd = 1.0;
         colorStart = vec3(0.68, 0.43, 0.58);
@@ -52,26 +55,27 @@ void main() {
         return;
     }
 
-    // Convert texture coordinates to [-1, 1] for angle calculation
-    vec2 uv = vTexCoord * 2.0 - 1.0;
-    uv = uv * vec2(-1.0, 1.0);
+    // Convert to [-1, 1] with X-flipped for clockwise azimuth
+    vec2 uv = (vTexCoord * 2.0 - 1.0) * vec2(-1.0, 1.0);
 
-    // Distance from origin [0, 0], i.e. radar gate index
+    // Correct for aspect ratio so radar renders as a circle
+    uv.x /= uResolution.x / uResolution.y;
+
+    // Distance from origin maps to radar gate index
     float distance = length(uv);
 
-    // Angle determines the radar ray index
-    float angle = atan(uv.y, uv.x) - (2.0 * PI / 4.0);
+    // Discard pixels outside the radar circle
+    if (distance > 1.0) discard;
+
+    // Angle determines the radar ray index (0 = North, clockwise)
+    float angle = atan(uv.y, uv.x) - (PI / 2.0);
     if (angle < 0.0) {
-        angle += 2.0 * PI; // Convert to [0, 2*PI]
+        angle += 2.0 * PI;
     }
 
-    float lineIndex = uNumLines * angle / (2.0 * PI); // Map angle to line index
-    float normalizedLineIndex = lineIndex / uNumLines; // Normalize line index to [0, 1]
-
+    float normalizedLineIndex = angle / (2.0 * PI);
     vec2 dataUV = vec2(distance, normalizedLineIndex);
     float radarValue = texture(uTexture, dataUV).r;
 
-    // if (radarValue <= 0.0) discard;
-    vec3 radarColor = scaleRadarColor(radarValue);
-    FragColor = vec4(radarColor, 1.0);
+    FragColor = vec4(scaleRadarColor(radarValue), 1.0);
 }

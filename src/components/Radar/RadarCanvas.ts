@@ -18,6 +18,7 @@ export default class RadarCanvas {
 
   private radarTexture: any;
   private radarData: Float32Array;
+  private vao: WebGLVertexArrayObject | null = null;
   private alive: boolean = true;
 
   constructor(
@@ -89,24 +90,29 @@ export default class RadarCanvas {
 
     if (!this.alive) return;
 
-    gl.clearColor(1.0, 1.0, 1.0, 1.0);
+    gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.bindVertexArray(this.vao);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindVertexArray(null);
   }
 
   private initQuad() {
     const { gl, program } = this;
     const vertices = new Float32Array(QuadVertices);
 
-    // Create and bind vertex buffer
+    this.vao = gl.createVertexArray();
+    gl.bindVertexArray(this.vao);
+
     const vertexBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
 
-    // Get attribute location and enable
     const positionLoc = gl.getAttribLocation(program, "aPosition");
     gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(positionLoc);
+
+    gl.bindVertexArray(null);
   }
 
   private initRadarTexture() {
@@ -147,7 +153,7 @@ export default class RadarCanvas {
     gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
 
     const numLinesLoc = gl.getUniformLocation(program, "uNumLines");
-    gl.uniform1f(numLinesLoc, 720);
+    gl.uniform1f(numLinesLoc, this.opt.numRays);
   }
 
   handleResize(width: number, height: number) {

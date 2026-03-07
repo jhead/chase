@@ -6,7 +6,7 @@ type RadarCacheKey = {
 };
 
 type RadarCacheEntry = {
-  frames: number[][];
+  frames: Float32Array[];
   lastUpdated: number;
   frameIndices: number[];
 };
@@ -34,7 +34,7 @@ class RadarCache {
     return entry;
   }
 
-  set(key: RadarCacheKey, frames: number[][], frameIndices: number[]): void {
+  set(key: RadarCacheKey, frames: Float32Array[], frameIndices: number[]): void {
     const cacheKey = this.getKey(key);
     this.cache.set(cacheKey, {
       frames,
@@ -45,7 +45,7 @@ class RadarCache {
 
   update(
     key: RadarCacheKey,
-    newFrames: number[][],
+    newFrames: Float32Array[],
     newFrameIndices: number[]
   ): void {
     const cacheKey = this.getKey(key);
@@ -58,7 +58,7 @@ class RadarCache {
 
     // Merge new frames with existing ones, avoiding duplicates
     const existingFrameIndices = new Set(existing.frameIndices);
-    const newFramesToAdd: number[][] = [];
+    const newFramesToAdd: Float32Array[] = [];
     const newIndicesToAdd: number[] = [];
 
     newFrameIndices.forEach((index, i) => {
