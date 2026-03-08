@@ -1,7 +1,9 @@
 use async_channel::Sender;
 use bevy::prelude::*;
 use nexrad_core::types::{ElevationScan, RadarVolume};
-use nexrad_render::{ExternalVolumeReceiver, RadarPlugin};
+use nexrad_render::{
+    ExternalVolumeReceiver, JsCommand, JsCommandReceiver, RadarPlugin, StateNotifier, UiState,
+};
 use std::sync::{OnceLock, RwLock};
 use wasm_bindgen::prelude::*;
 
@@ -11,17 +13,34 @@ static VOLUME_TX: OnceLock<Sender<RadarVolume>> = OnceLock::new();
 /// Scans accumulated by add_scan() until commit_volume() sends them as one volume.
 static PENDING_SCANS: OnceLock<RwLock<Vec<ElevationScan>>> = OnceLock::new();
 
+/// Channel from JS into Bevy: commands sent here are drained each frame by drain_js_commands.
+static CMD_TX: OnceLock<Sender<JsCommand>> = OnceLock::new();
+
+/// JS callback registered via set_state_callback(). Called from the StateNotifier on state change.
+static STATE_CB: OnceLock<js_sys::Function> = OnceLock::new();
+
 #[wasm_bindgen(start)]
 pub fn run() {
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook::set_once();
 
     let (vol_tx, vol_rx) = async_channel::unbounded::<RadarVolume>();
+    let (cmd_tx, cmd_rx) = async_channel::unbounded::<JsCommand>();
+
     VOLUME_TX.set(vol_tx).ok();
     PENDING_SCANS.set(RwLock::new(Vec::new())).ok();
+    CMD_TX.set(cmd_tx).ok();
 
     App::new()
         .insert_resource(ExternalVolumeReceiver(vol_rx))
+        .insert_resource(JsCommandReceiver(cmd_rx))
+        .insert_resource(StateNotifier(Some(Box::new(|state: &UiState| {
+            if let Some(cb) = STATE_CB.get() {
+                if let Ok(json) = serde_json::to_string(state) {
+                    let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&json));
+                }
+            }
+        }))))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 canvas: Some("#nexrad-bevy-canvas".to_string()),
@@ -33,6 +52,24 @@ pub fn run() {
         }))
         .add_plugins(RadarPlugin::default())
         .run();
+}
+
+/// Register a JS callback to receive UiState updates from Bevy.
+/// Called once after WASM init. The callback receives a JSON string matching UiState.
+#[wasm_bindgen]
+pub fn set_state_callback(cb: js_sys::Function) {
+    STATE_CB.set(cb).ok();
+}
+
+/// Send a command to the Bevy renderer. `json` is a JSON-serialized JsCommand discriminated union.
+/// Example: `{"type":"SetRenderMode","mode":"isosurface"}`
+#[wasm_bindgen]
+pub fn send_command(json: &str) {
+    if let Some(cmd) = JsCommand::from_json(json) {
+        if let Some(tx) = CMD_TX.get() {
+            let _ = tx.try_send(cmd);
+        }
+    }
 }
 
 /// Append one elevation scan. Data is row-major: reflectivity[ray * num_gates + gate].

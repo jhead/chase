@@ -1,0 +1,36 @@
+export const theme = {
+  bg: "rgba(10, 12, 18, 0.90)",
+  bgSolid: "#0a0c12",
+  bgHover: "rgba(255, 255, 255, 0.06)",
+  bgActive: "rgba(26, 127, 232, 0.20)",
+  border: "rgba(255, 255, 255, 0.08)",
+  accent: "#1a7fe8",
+  accentHover: "#2490f5",
+  textPrimary: "#e8ecf0",
+  textSecondary: "#8a9ab0",
+  textDim: "#4a5568",
+  blur: "blur(8px)",
+  radius: "3px",
+  fontMono: "'JetBrains Mono', 'SF Mono', 'Fira Mono', monospace",
+  fontSans: "Inter, system-ui, sans-serif",
+} as const;
+
+/** NWS reflectivity colormap breakpoints matching the WGSL shader. */
+export const NWS_COLORS = [
+  { dbz: -10, color: "#7f7f7f" },
+  { dbz: 0,   color: "#767676" },
+  { dbz: 5,   color: "#04e9e7" },
+  { dbz: 10,  color: "#019ff4" },
+  { dbz: 15,  color: "#0300f4" },
+  { dbz: 20,  color: "#02fd02" },
+  { dbz: 25,  color: "#01c501" },
+  { dbz: 30,  color: "#008e00" },
+  { dbz: 35,  color: "#fdf802" },
+  { dbz: 40,  color: "#e5bc00" },
+  { dbz: 45,  color: "#fd9500" },
+  { dbz: 50,  color: "#fd0000" },
+  { dbz: 55,  color: "#d40000" },
+  { dbz: 60,  color: "#bc0000" },
+  { dbz: 65,  color: "#f800fd" },
+  { dbz: 70,  color: "#9854c6" },
+] as const;

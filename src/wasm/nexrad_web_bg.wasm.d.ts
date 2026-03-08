@@ -2,8 +2,10 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const run: () => void;
+export const send_command: (a: number, b: number) => void;
 export const add_scan: (a: number, b: number, c: number, d: any, e: any) => void;
 export const commit_volume: (a: number, b: number) => void;
+export const set_state_callback: (a: any) => void;
 export const wasm_bindgen__closure__destroy__hd95243468a9866b9: (a: number, b: number) => void;
 export const wasm_bindgen__closure__destroy__h1a31c4847aef9ae6: (a: number, b: number) => void;
 export const wasm_bindgen__closure__destroy__hff55d557e3b804a4: (a: number, b: number) => void;

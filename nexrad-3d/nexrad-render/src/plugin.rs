@@ -1,9 +1,10 @@
 use bevy::{asset::embedded_asset, light::GlobalAmbientLight, prelude::*};
 use nexrad_core::{isosurface::IsoMeshData, types::{ElevationScan, RadarVolume}};
+use serde::Serialize;
 
 use crate::{
     basemap::BasemapPlugin,
-    camera::orbit_camera::OrbitCameraPlugin,
+    camera::orbit_camera::{OrbitCamera, OrbitCameraPlugin},
     rendering::{
         elevation_mesh::build_elevation_mesh,
         isosurface_mesh::into_bevy_mesh,
@@ -38,11 +39,66 @@ pub(crate) struct RadarDataChannel(pub(crate) async_channel::Receiver<RadarVolum
 #[derive(Resource)]
 pub struct ExternalVolumeReceiver(pub async_channel::Receiver<RadarVolume>);
 
+// ── JS ↔ Bevy IPC ─────────────────────────────────────────────────────────────
+
+/// Commands sent from JavaScript into the Bevy scene via `send_command(json)`.
+/// Extend this enum to add new JS-controllable actions — no new WASM exports needed.
+#[derive(Debug, Clone)]
+pub enum JsCommand {
+    SetRenderMode(RenderMode),
+    ResetCamera,
+}
+
+impl JsCommand {
+    pub fn from_json(json: &str) -> Option<Self> {
+        let v: serde_json::Value = serde_json::from_str(json).ok()?;
+        match v["type"].as_str()? {
+            "SetRenderMode" => {
+                let mode = RenderMode::from_str(v["mode"].as_str().unwrap_or("sweeps"));
+                Some(JsCommand::SetRenderMode(mode))
+            }
+            "ResetCamera" => Some(JsCommand::ResetCamera),
+            _ => None,
+        }
+    }
+}
+
+/// Receives `JsCommand`s from nexrad-web's static channel. Inserted by nexrad-web at startup.
+#[derive(Resource)]
+pub struct JsCommandReceiver(pub async_channel::Receiver<JsCommand>);
+
+/// Serializable snapshot of renderer state, pushed to JS on meaningful changes.
+/// Extend this struct to expose more state to the React HUD.
+#[derive(Serialize, Clone, Default)]
+pub struct UiState {
+    pub radar_loaded: bool,
+    pub iso_loaded: bool,
+    pub render_mode: String,
+    pub active_site: Option<String>,
+}
+
+/// Injected by nexrad-web with a closure that serializes `UiState` and calls the
+/// registered JS callback. nexrad-render has no js-sys / wasm-bindgen dependency.
+#[derive(Resource, Default)]
+pub struct StateNotifier(pub Option<Box<dyn Fn(&UiState) + Send + Sync>>);
+
+impl StateNotifier {
+    pub fn notify(&self, state: &UiState) {
+        if let Some(f) = &self.0 {
+            f(state);
+        }
+    }
+}
+
 #[derive(Resource)]
 pub struct IsoSurfaceChannel {
     pub(crate) tx: async_channel::Sender<Vec<IsoMeshData>>,
     pub(crate) rx: async_channel::Receiver<Vec<IsoMeshData>>,
 }
+
+/// Current UI state mirrored from Bevy resources. Updated and pushed to JS on change.
+#[derive(Resource, Default)]
+pub(crate) struct UiStateResource(pub UiState);
 
 /// Marks entities that are part of the current radar sweep volume.
 #[derive(Component)]
@@ -141,9 +197,15 @@ impl Plugin for RadarPlugin {
             .insert_resource(ext);
         }
 
+        if app.world().get_resource::<JsCommandReceiver>().is_some() {
+            app.add_systems(Update, drain_js_commands.before(toggle_render_mode));
+        }
+
         app.insert_resource(IsoSurfaceChannel { tx: iso_tx, rx: iso_rx })
             .insert_resource(self.initial_mode)
             .init_resource::<LoadStatus>()
+            .init_resource::<StateNotifier>()
+            .init_resource::<UiStateResource>()
             .add_plugins(BasemapPlugin)
             .add_plugins(OrbitCameraPlugin)
             .add_plugins(MaterialPlugin::<RadarMaterial>::default())
@@ -249,6 +311,8 @@ fn receive_radar_data(
     mut materials: ResMut<Assets<RadarMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut status: ResMut<LoadStatus>,
+    notifier: Res<StateNotifier>,
+    mut ui_state: ResMut<UiStateResource>,
 ) {
     let Ok(volume) = channel.0.try_recv() else {
         return;
@@ -284,6 +348,11 @@ fn receive_radar_data(
 
     log::info!("loaded {} elevation sweeps from {}", scans.len(), volume.site);
     status.radar_loaded = true;
+    ui_state.0.radar_loaded = true;
+    ui_state.0.iso_loaded = false; // reset iso until new isosurface arrives
+    ui_state.0.render_mode = mode.label().to_string();
+    ui_state.0.active_site = Some(volume.site.clone());
+    notifier.notify(&ui_state.0);
 }
 
 /// Spawn the isosurface computation off the Bevy main thread on native,
@@ -317,6 +386,8 @@ fn receive_isosurface_data(
     mut meshes: ResMut<Assets<Mesh>>,
     mut iso_materials: ResMut<Assets<IsoSurfaceMaterial>>,
     mut status: ResMut<LoadStatus>,
+    notifier: Res<StateNotifier>,
+    mut ui_state: ResMut<UiStateResource>,
 ) {
     let Ok(surfaces) = iso_channel.rx.try_recv() else {
         return;
@@ -346,6 +417,53 @@ fn receive_isosurface_data(
 
     log::info!("derived isosurface meshes generated");
     status.iso_loaded = true;
+    ui_state.0.iso_loaded = true;
+    notifier.notify(&ui_state.0);
+}
+
+fn apply_render_mode(
+    mode: &RenderMode,
+    sweeps: &mut Query<&mut Visibility, (With<RadarElevation>, Without<RadarIsoSurface>)>,
+    isos: &mut Query<&mut Visibility, (With<RadarIsoSurface>, Without<RadarElevation>)>,
+) {
+    let sweeps_visible = mode.shows_sweeps();
+    let isos_visible = mode.shows_isosurface();
+    for mut v in sweeps.iter_mut() {
+        *v = if sweeps_visible { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut v in isos.iter_mut() {
+        *v = if isos_visible { Visibility::Visible } else { Visibility::Hidden };
+    }
+}
+
+fn drain_js_commands(
+    receiver: Res<JsCommandReceiver>,
+    mut mode: ResMut<RenderMode>,
+    mut camera: Query<&mut OrbitCamera>,
+    mut sweeps: Query<&mut Visibility, (With<RadarElevation>, Without<RadarIsoSurface>)>,
+    mut isos: Query<&mut Visibility, (With<RadarIsoSurface>, Without<RadarElevation>)>,
+    notifier: Res<StateNotifier>,
+    mut ui_state: ResMut<UiStateResource>,
+    status: Res<LoadStatus>,
+) {
+    while let Ok(cmd) = receiver.0.try_recv() {
+        match cmd {
+            JsCommand::SetRenderMode(new_mode) => {
+                *mode = new_mode;
+                apply_render_mode(&mode, &mut sweeps, &mut isos);
+                log::info!("JS set render mode: {}", mode.label());
+                ui_state.0.render_mode = mode.label().to_string();
+                ui_state.0.radar_loaded = status.radar_loaded;
+                ui_state.0.iso_loaded = status.iso_loaded;
+                notifier.notify(&ui_state.0);
+            }
+            JsCommand::ResetCamera => {
+                if let Ok(mut cam) = camera.single_mut() {
+                    *cam = OrbitCamera::default();
+                }
+            }
+        }
+    }
 }
 
 fn toggle_render_mode(
@@ -353,33 +471,23 @@ fn toggle_render_mode(
     mut mode: ResMut<RenderMode>,
     mut sweeps: Query<&mut Visibility, (With<RadarElevation>, Without<RadarIsoSurface>)>,
     mut isos: Query<&mut Visibility, (With<RadarIsoSurface>, Without<RadarElevation>)>,
+    notifier: Res<StateNotifier>,
+    mut ui_state: ResMut<UiStateResource>,
+    status: Res<LoadStatus>,
 ) {
     if !keys.just_pressed(KeyCode::KeyV) {
         return;
     }
 
     *mode = mode.next();
-
-    let sweeps_visible = mode.shows_sweeps();
-    let isos_visible = mode.shows_isosurface();
-
-    for mut visibility in &mut sweeps {
-        *visibility = if sweeps_visible {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-    for mut visibility in &mut isos {
-        *visibility = if isos_visible {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
+    apply_render_mode(&mode, &mut sweeps, &mut isos);
 
     log::info!(
         "render mode: {} (press V to cycle sweeps → isosurface → combined)",
         mode.label()
     );
+    ui_state.0.render_mode = mode.label().to_string();
+    ui_state.0.radar_loaded = status.radar_loaded;
+    ui_state.0.iso_loaded = status.iso_loaded;
+    notifier.notify(&ui_state.0);
 }
