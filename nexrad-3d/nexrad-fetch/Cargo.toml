@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-nexrad-core = { path = "../nexrad-core" }
+nexrad-core = { path = "../nexrad-core", features = ["parse"] }
 log = "0.4"
 # wasmbind makes Utc::now() delegate to js-sys Date on wasm32; harmless on native
 chrono = { version = "0.4", features = ["wasmbind"] }

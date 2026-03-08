@@ -1,51 +1,47 @@
 #import bevy_pbr::forward_io::VertexOutput
 
-// In Bevy 0.18 the material bind group is group 3 (MATERIAL_BIND_GROUP_INDEX = 3).
 @group(3) @binding(0) var reflectivity_texture: texture_2d<f32>;
 @group(3) @binding(1) var reflectivity_sampler: sampler;
 
-// Official NWS Standard Reflectivity Color Table.
-// Input: normalized reflectivity in [0, 1] (where 1.0 = 75 dBZ).
 fn nws_colormap(dbz: f32) -> vec3<f32> {
     if dbz < 5.0 {
-        return vec3<f32>(0.0, 0.925, 0.925);    // #00ECEC  5 dBZ
+        return vec3<f32>(0.0, 0.925, 0.925);
     } else if dbz < 10.0 {
-        return vec3<f32>(0.0, 0.925, 0.925);    // #00ECEC  5-10
+        return vec3<f32>(0.0, 0.925, 0.925);
     } else if dbz < 15.0 {
-        return vec3<f32>(0.004, 0.627, 0.965);  // #01A0F6  10-15
+        return vec3<f32>(0.004, 0.627, 0.965);
     } else if dbz < 20.0 {
-        return vec3<f32>(0.0, 0.0, 0.965);      // #0000F6  15-20
+        return vec3<f32>(0.0, 0.0, 0.965);
     } else if dbz < 25.0 {
-        return vec3<f32>(0.0, 1.0, 0.0);        // #00FF00  20-25
+        return vec3<f32>(0.0, 1.0, 0.0);
     } else if dbz < 30.0 {
-        return vec3<f32>(0.0, 0.784, 0.0);      // #00C800  25-30
+        return vec3<f32>(0.0, 0.784, 0.0);
     } else if dbz < 35.0 {
-        return vec3<f32>(0.0, 0.565, 0.0);      // #009000  30-35
+        return vec3<f32>(0.0, 0.565, 0.0);
     } else if dbz < 40.0 {
-        return vec3<f32>(0.973, 0.973, 0.0);    // #F8F800  35-40
+        return vec3<f32>(0.973, 0.973, 0.0);
     } else if dbz < 45.0 {
-        return vec3<f32>(0.906, 0.753, 0.0);    // #E7C000  40-45
+        return vec3<f32>(0.906, 0.753, 0.0);
     } else if dbz < 50.0 {
-        return vec3<f32>(1.0, 0.565, 0.0);      // #FF9000  45-50
+        return vec3<f32>(1.0, 0.565, 0.0);
     } else if dbz < 55.0 {
-        return vec3<f32>(1.0, 0.0, 0.0);        // #FF0000  50-55
+        return vec3<f32>(1.0, 0.0, 0.0);
     } else if dbz < 60.0 {
-        return vec3<f32>(0.839, 0.0, 0.0);      // #D60000  55-60
+        return vec3<f32>(0.839, 0.0, 0.0);
     } else if dbz < 65.0 {
-        return vec3<f32>(0.753, 0.0, 0.0);      // #C00000  60-65
+        return vec3<f32>(0.753, 0.0, 0.0);
     } else if dbz < 70.0 {
-        return vec3<f32>(1.0, 0.0, 1.0);        // #FF00FF  65-70
+        return vec3<f32>(1.0, 0.0, 1.0);
     } else {
-        return vec3<f32>(0.6, 0.333, 0.788);    // #9955C9  70+
+        return vec3<f32>(0.6, 0.333, 0.788);
     }
 }
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let raw_value = textureSample(reflectivity_texture, reflectivity_sampler, in.uv).r;
-    let dbz = raw_value * 75.0;
+    let raw = textureSample(reflectivity_texture, reflectivity_sampler, in.uv).r;
+    let dbz = raw * 75.0;
 
-    // Discard pixels below 10 dBZ — removes ground clutter and noise speckle.
     if dbz < 10.0 {
         discard;
     }

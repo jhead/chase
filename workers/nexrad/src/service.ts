@@ -67,6 +67,100 @@ export default class RadarService {
     return output;
   }
 
+  /**
+   * Fetch the latest volume file and return all elevation sweeps for the 3D Bevy viewer.
+   * Each sweep: { elevation_angle, gate_size_m, first_gate_m, azimuths, reflectivity }.
+   * reflectivity is Float32Array row-major, normalized 0–1 (dBZ/75).
+   */
+  async getVolumeData(date: string, radarName: string): Promise<{
+    site: string;
+    sweeps: Array<{
+      elevation_angle: number;
+      gate_size_m: number;
+      first_gate_m: number;
+      azimuths: number[];
+      reflectivity: number[];
+    }>;
+    debug?: string;
+  }> {
+    const files = await this.listRadarFiles(date, radarName);
+    const v06 = files.filter((k) => k.endsWith("_V06"));
+    const frame = v06[0];
+    if (!frame) {
+      return {
+        site: radarName,
+        sweeps: [],
+        debug: `no V06 files (${files.length} total) for prefix ${date}/${radarName}`,
+      };
+    }
+
+    const rawData = await fetchWithCache(
+      `${this.baseUrl}/s3/${this.bucket}/${frame}`,
+      this.cache
+    );
+    const radar = new Level2Radar(Buffer.from(rawData));
+    const elevations = radar.listElevations();
+    const sweeps: Array<{
+      elevation_angle: number;
+      gate_size_m: number;
+      first_gate_m: number;
+      azimuths: number[];
+      reflectivity: number[];
+    }> = [];
+
+    for (const elevNum of elevations) {
+      radar.setElevation(elevNum);
+      // getHighresReflectivity() returns HighResData[] (one object per ray),
+      // not number[][]. Each HighResData has: gate_count, gate_size, first_gate, moment_data.
+      const rays = radar.getHighresReflectivity() as any[];
+      const azs = radar.getAzimuth() as number[];
+      if (!rays?.length || !azs?.length) continue;
+
+      const firstRay = rays[0];
+      const numGates: number = firstRay?.gate_count ?? 0;
+      if (numGates === 0) continue;
+
+      const header = radar.getHeader(0) as { elevation_angle?: number } | undefined;
+      const elevationAngle = header?.elevation_angle ?? elevNum * 0.5;
+
+      // gate_size and first_gate are in km in nexrad-level-2-data — convert to meters.
+      const gateSizeM: number = (firstRay?.gate_size ?? 0.25) * 1000;
+      const firstGateM: number = (firstRay?.first_gate ?? 2.125) * 1000;
+
+      const numRays = azs.length;
+
+      // Sort rays by azimuth (matching the Rust parser) for consistent UV mapping.
+      const rayOrder = Array.from({ length: numRays }, (_, i) => i)
+        .sort((a, b) => azs[a] - azs[b]);
+      const sortedAzs = rayOrder.map(i => azs[i]);
+      const sortedRays = rayOrder.map(i => rays[i]);
+
+      const reflectivity: number[] = [];
+      for (let r = 0; r < numRays; r++) {
+        const momentData: (number | null)[] = sortedRays[r]?.moment_data ?? [];
+        for (let g = 0; g < numGates; g++) {
+          const v = momentData[g];
+          // moment_data values are already in dBZ; normalize 0–1 (75 dBZ = 1)
+          reflectivity.push(
+            v != null && typeof v === "number"
+              ? Math.max(0, Math.min(1, v / 75))
+              : 0
+          );
+        }
+      }
+
+      sweeps.push({
+        elevation_angle: elevationAngle,
+        gate_size_m: gateSizeM,
+        first_gate_m: firstGateM,
+        azimuths: sortedAzs,
+        reflectivity,
+      });
+    }
+
+    return { site: radarName, sweeps };
+  }
+
   async listRadarFiles(date: string, radar: string): Promise<string[]> {
     const cacheKey = `${date}-${radar}-v6`;
     const cached = await this.cache.get(cacheKey);
@@ -76,8 +170,16 @@ export default class RadarService {
     }
 
     const prefix = `${date}/${radar}`;
-    const url = `${this.baseUrl}/s3/${this.bucket}/?list-type=2&prefix=${prefix}&max-keys=1000`;
+    const url = `${this.baseUrl}/s3/${this.bucket}/?list-type=2&prefix=${encodeURIComponent(prefix)}&max-keys=1000`;
     const res = await fetch(url);
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(
+        `S3 list failed ${res.status}: ${body.slice(0, 200)}`
+      );
+    }
+
     const text = await res.text();
 
     const keys = [...text.matchAll(/<Key>([^<]+)<\/Key>/g)]

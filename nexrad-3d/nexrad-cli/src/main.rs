@@ -65,29 +65,37 @@ fn main() {
         .run();
 }
 
-/// Spawn cameras. In screenshot mode, four quadrant cameras; otherwise a single orbit.
-fn setup_cameras(mut commands: Commands, args: Res<CliArgs>) {
-    if args.output.is_some() {
-        let views: [(f32, f32); 4] = [
-            (0.3,                                   1.1),
-            (0.0, std::f32::consts::FRAC_PI_2 - 0.01),
-            (std::f32::consts::PI,                  0.8),
-            (std::f32::consts::FRAC_PI_2,           0.6),
-        ];
-        for (i, (yaw, pitch)) in views.iter().enumerate() {
-            let orbit = OrbitCamera { focus: Vec3::ZERO, radius: 400_000.0, yaw: *yaw, pitch: *pitch };
-            let transform = orbit.to_transform();
-            let camera = Camera { order: i as isize, ..default() };
-            if i == 0 {
-                commands.spawn((Camera3d::default(), camera, transform, orbit, QuadrantCamera(i)));
-            } else {
-                commands.spawn((Camera3d::default(), camera, transform, QuadrantCamera(i)));
-            }
-        }
-    } else {
-        let orbit = OrbitCamera::default();
+/// In screenshot mode, replace the plugin's single camera with four quadrant cameras.
+/// In normal mode, OrbitCameraPlugin::spawn_camera already handles it.
+fn setup_cameras(
+    mut commands: Commands,
+    args: Res<CliArgs>,
+    existing: Query<Entity, With<Camera3d>>,
+) {
+    if args.output.is_none() {
+        return;
+    }
+
+    // Despawn the plugin's default camera before adding quadrant cameras.
+    for entity in &existing {
+        commands.entity(entity).despawn();
+    }
+
+    let views: [(f32, f32); 4] = [
+        (0.3,                                   1.1),
+        (0.0, std::f32::consts::FRAC_PI_2 - 0.01),
+        (std::f32::consts::PI,                  0.8),
+        (std::f32::consts::FRAC_PI_2,           0.6),
+    ];
+    for (i, (yaw, pitch)) in views.iter().enumerate() {
+        let orbit = OrbitCamera { focus: Vec3::ZERO, radius: 400_000.0, yaw: *yaw, pitch: *pitch };
         let transform = orbit.to_transform();
-        commands.spawn((Camera3d::default(), transform, orbit));
+        let camera = Camera { order: i as isize, ..default() };
+        if i == 0 {
+            commands.spawn((Camera3d::default(), camera, transform, orbit, QuadrantCamera(i)));
+        } else {
+            commands.spawn((Camera3d::default(), camera, transform, QuadrantCamera(i)));
+        }
     }
 }
 

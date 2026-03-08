@@ -3,9 +3,13 @@ name = "nexrad-core"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Enable NEXRAD Level‑II parsing (pulls in nexrad-data, bzip2). Off for WASM.
+parse = ["nexrad-data", "nexrad-model"]
+
 [dependencies]
 lin_alg = "1.4.1"
 log = "0.4"
 mcubes = "0.1.7"
-nexrad-data = { version = "0.2.0", features = ["decode", "nexrad-model"] }
-nexrad-model = "0.1.0"
+nexrad-data = { version = "0.2.0", features = ["decode", "nexrad-model"], optional = true }
+nexrad-model = { version = "0.1.0", optional = true }

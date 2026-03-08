@@ -50,29 +50,30 @@ const proxyRoute = async (request: Request, env: Env): Promise<Response> => {
 };
 
 const radarRoute = async (request: Request, env: Env): Promise<Response> => {
-  const params = URL.parse(request.url)!.searchParams;
+  const params = new URL(request.url).searchParams;
   const frameIndex = parseInt(params.get("frame") || "0");
   const radarName = params.get("radar") || "KHTX";
   const date = params.get("date") || "2024/05/16";
+  const volume = params.get("volume") === "1";
 
-  console.log("Radar request:", { date, radarName, frameIndex });
-  const service = new RadarService(NOAA_LEVEL2_BUCKET, env.cache);
+  // Use request origin so worker's self-fetch (list + get file) works when deployed
+  const baseUrl = new URL(request.url).origin;
+  const service = new RadarService(NOAA_LEVEL2_BUCKET, env.cache, baseUrl);
 
   try {
+    if (volume) {
+      const output = await service.getVolumeData(date, radarName);
+      return Response.json(output, { headers: corsHeaders(request) });
+    }
     const output = await service.getRadialData(date, radarName, frameIndex);
-    return Response.json(output, {
-      headers: corsHeaders(request),
-    });
+    return Response.json(output, { headers: corsHeaders(request) });
   } catch (error: unknown) {
     console.error("Error processing radar request:", error);
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
     return Response.json(
       { error: errorMessage },
-      {
-        status: 500,
-        headers: corsHeaders(request),
-      }
+      { status: 500, headers: corsHeaders(request) }
     );
   }
 };

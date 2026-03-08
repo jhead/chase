@@ -19,7 +19,7 @@ impl Default for OrbitCamera {
     fn default() -> Self {
         Self {
             focus: Vec3::ZERO,
-            radius: 400_000.0, // 400km — good overview of a ~250km radar range
+            radius: 400_000.0, // 400km — full overview of a ~250km radar range
             yaw: 0.3,
             pitch: 1.1, // ~63° from horizontal — nice perspective
         }
@@ -42,8 +42,26 @@ pub struct OrbitCameraPlugin;
 
 impl Plugin for OrbitCameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, orbit_camera_system);
+        app.add_systems(Startup, spawn_camera)
+            .add_systems(Update, orbit_camera_system);
     }
+}
+
+pub fn spawn_camera(mut commands: Commands) {
+    let cam = OrbitCamera::default();
+    let transform = cam.to_transform();
+    commands.spawn((
+        Camera3d::default(),
+        Projection::Perspective(PerspectiveProjection {
+            near: 100.0,
+            // Native uses perspective_infinite_reverse_rh (far ignored).
+            // WASM/WebGL2 uses a finite projection, so we need a large far.
+            far: 5_000_000.0,
+            ..default()
+        }),
+        cam,
+        transform,
+    ));
 }
 
 fn orbit_camera_system(

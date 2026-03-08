@@ -32,6 +32,11 @@ pub struct LoadStatus {
 #[derive(Resource)]
 pub(crate) struct RadarDataChannel(pub(crate) async_channel::Receiver<RadarVolume>);
 
+/// When set (e.g. by nexrad-web), a system drains this receiver and forwards
+/// each volume to `RadarVolumeSender`. Allows JS to push volumes without Rust fetch.
+#[derive(Resource)]
+pub struct ExternalVolumeReceiver(pub async_channel::Receiver<RadarVolume>);
+
 #[derive(Resource)]
 pub struct IsoSurfaceChannel {
     pub(crate) tx: async_channel::Sender<Vec<IsoMeshData>>,
@@ -101,6 +106,9 @@ impl RenderMode {
 ///
 /// Exposes `RadarVolumeSender` as a resource so each entrypoint (CLI thread,
 /// WASM `spawn_local`) can feed parsed volumes into the scene.
+///
+/// For WASM, insert `ExternalVolumeReceiver(rx)` before adding this plugin;
+/// the plugin will consume it and drain volumes into the scene.
 pub struct RadarPlugin {
     pub initial_mode: RenderMode,
 }
@@ -121,9 +129,18 @@ impl Plugin for RadarPlugin {
         let (radar_tx, radar_rx) = async_channel::unbounded::<RadarVolume>();
         let (iso_tx, iso_rx) = async_channel::unbounded::<Vec<IsoMeshData>>();
 
-        app.insert_resource(RadarVolumeSender(radar_tx))
-            .insert_resource(RadarDataChannel(radar_rx))
-            .insert_resource(IsoSurfaceChannel { tx: iso_tx, rx: iso_rx })
+        app.insert_resource(RadarVolumeSender(radar_tx.clone()))
+            .insert_resource(RadarDataChannel(radar_rx));
+
+        if let Some(ext) = app.world_mut().remove_resource::<ExternalVolumeReceiver>() {
+            app.add_systems(
+                Update,
+                forward_external_volume.before(receive_radar_data),
+            )
+            .insert_resource(ext);
+        }
+
+        app.insert_resource(IsoSurfaceChannel { tx: iso_tx, rx: iso_rx })
             .insert_resource(self.initial_mode)
             .init_resource::<LoadStatus>()
             .add_plugins(OrbitCameraPlugin)
@@ -152,9 +169,20 @@ fn setup_scene_lighting(
         Transform::default().looking_at(Vec3::new(0.4, -0.8, 0.3), Vec3::Y),
     ));
     global_ambient.brightness = 1000.0;
+
 }
 
 // ── Per-frame systems ─────────────────────────────────────────────────────────
+
+/// When using external volume receiver (WASM), drain it and forward to the internal channel.
+fn forward_external_volume(
+    ext: Res<ExternalVolumeReceiver>,
+    sender: Res<RadarVolumeSender>,
+) {
+    while let Ok(volume) = ext.0.try_recv() {
+        let _ = sender.0.try_send(volume);
+    }
+}
 
 /// Compute (lower_elev, upper_elev) slab bounds for each scan in a sorted
 /// elevation list. Adjacent slabs share the same boundary height so the
