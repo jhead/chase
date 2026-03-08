@@ -1,7 +1,7 @@
 use nexrad_data::volume::File;
 use nexrad_model::data::{MomentValue, Sweep};
 
-use crate::nexrad::types::{ElevationScan, RadarVolume};
+use crate::types::{ElevationScan, RadarVolume};
 
 /// Parse a raw NEXRAD Level II archive file (bytes) into a `RadarVolume`
 /// containing one `ElevationScan` per elevation tilt.

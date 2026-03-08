@@ -4,7 +4,7 @@ use bevy::{
     prelude::*,
 };
 
-use crate::nexrad::{beam_height::polar_to_world, types::ElevationScan};
+use nexrad_core::{beam_height::polar_to_world, types::ElevationScan};
 
 /// Build a 3D slab mesh for one elevation scan.
 ///

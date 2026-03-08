@@ -1,0 +1,12 @@
+[package]
+name = "nexrad-render"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nexrad-core = { path = "../nexrad-core" }
+async-channel = "2.5.0"
+# No dynamic_linking here — it is additive and gets enabled by nexrad-cli's
+# direct bevy dep. Keeping it absent ensures the crate compiles for wasm32.
+bevy = "0.18.1"
+log = "0.4"

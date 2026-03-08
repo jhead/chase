@@ -14,7 +14,7 @@ pub struct RadarMaterial {
 
 impl Material for RadarMaterial {
     fn fragment_shader() -> ShaderRef {
-        "shaders/radar_elevation.wgsl".into()
+        "embedded://nexrad_render/rendering/shaders/radar_elevation.wgsl".into()
     }
 
     fn alpha_mode(&self) -> AlphaMode {
@@ -31,7 +31,7 @@ pub struct IsoSurfaceMaterial {}
 
 impl Material for IsoSurfaceMaterial {
     fn fragment_shader() -> ShaderRef {
-        "shaders/isosurface.wgsl".into()
+        "embedded://nexrad_render/rendering/shaders/isosurface.wgsl".into()
     }
 
     fn alpha_mode(&self) -> AlphaMode {

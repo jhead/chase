@@ -1,7 +1,6 @@
 use chrono::{Datelike, Utc};
+use nexrad_core::{parser, types::RadarVolume};
 use reqwest::Client;
-
-use crate::nexrad::types::RadarVolume;
 
 const PROXY_BASE: &str = "https://nexrad.justindhead.workers.dev";
 const BUCKET: &str = "unidata-nexrad-level2";
@@ -81,5 +80,5 @@ pub async fn fetch_latest_volume(site: &str) -> Result<RadarVolume, String> {
     let bytes = fetch_radar_file(&key).await?;
 
     log::info!("parsing {} bytes for {site}", bytes.len());
-    super::parser::parse_volume(site, bytes)
+    parser::parse_volume(site, bytes)
 }

@@ -1,12 +1,7 @@
-use bevy::{
-    asset::RenderAssetUsages,
-    mesh::{Indices, PrimitiveTopology},
-    prelude::*,
-};
 use lin_alg::f32::Vec3 as LinVec3;
 use mcubes::{MarchingCubes, MeshSide};
 
-use crate::nexrad::{beam_height::polar_to_world, types::ElevationScan};
+use crate::{beam_height::polar_to_world, types::ElevationScan};
 
 /// Single isosurface threshold. One opaque mesh avoids z-fighting that nested
 /// transparent shells produce. Vertex colors (sampled inward from the surface)
@@ -14,6 +9,9 @@ use crate::nexrad::{beam_height::polar_to_world, types::ElevationScan};
 /// exist behind the surface, green/cyan at the edges.
 const THRESHOLD_DBZ: f32 = 20.0;
 
+/// Platform-agnostic isosurface mesh data — plain vertex arrays with no
+/// engine-specific types. Convert to a Bevy `Mesh` via `into_bevy_mesh` in
+/// the `nexrad-render` crate.
 #[derive(Debug, Clone)]
 pub struct IsoMeshData {
     pub positions: Vec<[f32; 3]>,
@@ -22,22 +20,8 @@ pub struct IsoMeshData {
     pub indices: Vec<u32>,
 }
 
-impl IsoMeshData {
-    pub fn into_mesh(self) -> Mesh {
-        let mut mesh = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::RENDER_WORLD,
-        );
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.colors);
-        mesh.insert_indices(Indices::U32(self.indices));
-        mesh
-    }
-}
-
 /// Official NWS reflectivity colormap. Input: normalized [0, 1] (1.0 = 75 dBZ).
-fn nws_colormap(v: f32, alpha: f32) -> [f32; 4] {
+pub fn nws_colormap(v: f32, alpha: f32) -> [f32; 4] {
     let dbz = v * 75.0;
     let rgb = if dbz < 5.0 {
         [0.0, 0.925, 0.925]    // #00ECEC
@@ -146,7 +130,8 @@ fn dilate_3d(
 struct GridState {
     /// Scalar reflectivity field (post-dilation + blur).
     grid: Vec<f32>,
-    /// Pre-dilation grid for accurate vertex coloring (actual peak values).
+    /// Pre-dilation grid retained for future GPU-side coloring pipeline.
+    #[allow(dead_code)]
     raw_grid: Vec<f32>,
     nx: usize,
     /// Horizontal depth dimension (maps Bevy Z → grid Y axis).
@@ -246,7 +231,7 @@ fn build_grid(scans: &[ElevationScan]) -> Option<GridState> {
         }
     }
 
-    info!(
+    log::info!(
         "Isosurface grid: max_val={:.3}, dims={}×{}×{}",
         max_val, nx, nz_dim, ny_dim
     );
@@ -276,8 +261,6 @@ fn build_grid(scans: &[ElevationScan]) -> Option<GridState> {
 }
 
 /// Sample the dilated scalar grid at Bevy world coords via trilinear interpolation.
-/// Using the dilated grid (not raw) means every cell inside the storm volume has
-/// the actual peak reflectivity value, not a sparse 0 from an empty pre-dilation cell.
 fn sample_dilated(state: &GridState, bx: f32, by: f32, bz: f32) -> f32 {
     let GridState { nx, nz_dim, ny_dim, half_extent, dx, dz, dy, .. } = *state;
     let idx = |ix: usize, iz: usize, iy: usize| ix + iz * nx + iy * nx * nz_dim;
@@ -330,7 +313,7 @@ fn extract_surface(state: &GridState, threshold_norm: f32, alpha: f32) -> Option
     .ok()?;
 
     let mesh = mc.generate(MeshSide::OutsideOnly);
-    info!(
+    log::info!(
         "MC @ {:.0} dBZ: {} verts, {} indices",
         threshold_norm * 75.0,
         mesh.vertices.len(),
@@ -375,8 +358,6 @@ fn extract_surface(state: &GridState, threshold_norm: f32, alpha: f32) -> Option
             let ny_n = bny / len;
             let nz_n = bnz / len;
 
-            // Sample the dilated grid (not raw) — every interior cell carries the
-            // actual peak reflectivity from the original scan data via max-pooling.
             let peak = (0..10)
                 .map(|step| {
                     let t = step as f32 * step_size;

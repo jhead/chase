@@ -1,0 +1,15 @@
+[package]
+name = "nexrad-web"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nexrad-render = { path = "../nexrad-render" }
+nexrad-fetch = { path = "../nexrad-fetch" }
+bevy = "0.18.1"
+wasm-bindgen-futures = "0.4"
+log = "0.4"
+
+# web-sys for reading site from query string
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window", "Location"] }

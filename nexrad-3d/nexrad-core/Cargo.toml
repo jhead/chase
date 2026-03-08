@@ -1,0 +1,11 @@
+[package]
+name = "nexrad-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lin_alg = "1.4.1"
+log = "0.4"
+mcubes = "0.1.7"
+nexrad-data = { version = "0.2.0", features = ["decode", "nexrad-model"] }
+nexrad-model = "0.1.0"
