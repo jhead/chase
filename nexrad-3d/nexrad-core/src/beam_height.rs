@@ -45,9 +45,10 @@ mod tests {
 
     #[test]
     fn beam_height_at_half_degree() {
-        // At 0.5° elevation and 460km range, beam should be ~4km
+        // At 0.5° elevation and 460km range the 4/3 Earth model gives ~16.5km —
+        // Earth curves away by ~16km at this distance, dominating the geometric rise.
         let h = beam_height_m(460_000.0, 0.5);
-        assert!(h > 3000.0 && h < 6000.0, "h = {h}");
+        assert!(h > 14_000.0 && h < 20_000.0, "h = {h}");
     }
 
     #[test]

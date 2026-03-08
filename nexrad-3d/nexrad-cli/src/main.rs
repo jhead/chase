@@ -6,9 +6,10 @@ use bevy::{
     window::PrimaryWindow,
 };
 use clap::Parser;
+use nexrad_core::sites::RadarSite;
 use nexrad_render::{
     camera::orbit_camera::OrbitCamera,
-    LoadStatus, RadarPlugin, RadarVolumeSender, RenderMode,
+    BasemapConfig, LoadStatus, RadarPlugin, RadarVolumeSender, RenderMode,
 };
 
 #[derive(Parser, Resource, Debug, Clone)]
@@ -44,6 +45,15 @@ fn main() {
     let initial_mode = RenderMode::from_str(&args.mode);
     let is_headless = args.output.is_some();
 
+    // Set the basemap origin to the selected radar site's coordinates.
+    let basemap_config = RadarSite::lookup(&args.site)
+        .map(|site| BasemapConfig {
+            origin_lat: site.lat,
+            origin_lng: site.lng,
+            cull_radius_m: 800_000.0,
+        })
+        .unwrap_or_default();
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -55,6 +65,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(RadarPlugin { initial_mode })
+        .insert_resource(basemap_config)
         .insert_resource(args)
         .init_resource::<ScreenshotState>()
         .add_systems(Startup, (setup_cameras, start_radar_fetch))

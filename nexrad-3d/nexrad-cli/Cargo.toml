@@ -8,6 +8,7 @@ name = "nexrad-3d"
 path = "src/main.rs"
 
 [dependencies]
+nexrad-core = { path = "../nexrad-core" }
 nexrad-render = { path = "../nexrad-render" }
 nexrad-fetch = { path = "../nexrad-fetch" }
 # dynamic_linking speeds up dev builds; features are additive so nexrad-render

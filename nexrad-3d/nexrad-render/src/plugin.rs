@@ -2,6 +2,7 @@ use bevy::{asset::embedded_asset, light::GlobalAmbientLight, prelude::*};
 use nexrad_core::{isosurface::IsoMeshData, types::{ElevationScan, RadarVolume}};
 
 use crate::{
+    basemap::BasemapPlugin,
     camera::orbit_camera::OrbitCameraPlugin,
     rendering::{
         elevation_mesh::build_elevation_mesh,
@@ -143,6 +144,7 @@ impl Plugin for RadarPlugin {
         app.insert_resource(IsoSurfaceChannel { tx: iso_tx, rx: iso_rx })
             .insert_resource(self.initial_mode)
             .init_resource::<LoadStatus>()
+            .add_plugins(BasemapPlugin)
             .add_plugins(OrbitCameraPlugin)
             .add_plugins(MaterialPlugin::<RadarMaterial>::default())
             .add_plugins(MaterialPlugin::<IsoSurfaceMaterial>::default())
