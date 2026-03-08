@@ -31,7 +31,7 @@ impl Default for BasemapConfig {
         Self {
             origin_lat: 36.0,
             origin_lng: -98.0,
-            cull_radius_m: 800_000.0,
+            cull_radius_m: 4_500_000.0,
         }
     }
 }

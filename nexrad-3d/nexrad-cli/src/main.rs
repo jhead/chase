@@ -50,7 +50,7 @@ fn main() {
         .map(|site| BasemapConfig {
             origin_lat: site.lat,
             origin_lng: site.lng,
-            cull_radius_m: 800_000.0,
+            cull_radius_m: 4_500_000.0,
         })
         .unwrap_or_default();
 
