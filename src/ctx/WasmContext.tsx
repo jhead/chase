@@ -21,7 +21,8 @@ export type JsCommand =
   | { type: "ResetCamera" }
   | { type: "SetElevationCount"; count: number }
   | { type: "SetThreshold"; dbz: number }
-  | { type: "SetPaneLayout"; layout: "single" | "split-h" | "split-v" | "quad" };
+  | { type: "SetPaneLayout"; layout: "single" | "split-h" | "split-v" | "quad" }
+  | { type: "SetCameraMode"; mode: "2d" | "3d" };
 
 /** Serializable state pushed from Bevy to React on meaningful changes. */
 export interface UiState {

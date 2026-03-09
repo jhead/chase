@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::{
     basemap::BasemapPlugin,
-    camera::orbit_camera::{OrbitCamera, OrbitCameraPlugin},
+    camera::orbit_camera::{CameraMode, OrbitCamera, OrbitCameraPlugin},
     rendering::{
         elevation_mesh::build_elevation_mesh,
         isosurface_mesh::into_bevy_mesh,
@@ -49,6 +49,7 @@ pub enum JsCommand {
     ResetCamera,
     SetElevationCount(u32),
     SetThreshold(f32),
+    SetCameraMode(CameraMode),
 }
 
 impl JsCommand {
@@ -67,6 +68,13 @@ impl JsCommand {
             "SetThreshold" => {
                 let dbz = v["dbz"].as_f64()? as f32;
                 Some(JsCommand::SetThreshold(dbz))
+            }
+            "SetCameraMode" => {
+                let cam_mode = match v["mode"].as_str().unwrap_or("2d") {
+                    "3d" => CameraMode::Tilt3D,
+                    _ => CameraMode::Pan2D,
+                };
+                Some(JsCommand::SetCameraMode(cam_mode))
             }
             _ => None,
         }
@@ -530,6 +538,7 @@ fn drain_js_commands(
     mut threshold: ResMut<ThresholdDbz>,
     elev_material_handles: Query<&MeshMaterial3d<RadarMaterial>, With<RadarElevation>>,
     mut radar_materials: ResMut<Assets<RadarMaterial>>,
+    mut camera_mode: ResMut<CameraMode>,
 ) {
     while let Ok(cmd) = receiver.0.try_recv() {
         match cmd {
@@ -571,6 +580,9 @@ fn drain_js_commands(
                     *cam = OrbitCamera::default();
                     cam.focus = focus;
                 }
+            }
+            JsCommand::SetCameraMode(new_mode) => {
+                *camera_mode = new_mode;
             }
         }
     }

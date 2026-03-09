@@ -1,9 +1,11 @@
 import styled from "@emotion/styled";
+import { useState } from "react";
 import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
 
 type RenderMode = "sweeps" | "isosurface" | "combined";
 type PaneLayout = "single" | "split-h" | "split-v" | "quad";
+type CameraMode = "2d" | "3d";
 
 const RENDER_MODES: { mode: RenderMode; label: string; title: string }[] = [
   { mode: "sweeps",     label: "S", title: "Sweeps" },
@@ -17,12 +19,23 @@ const PANE_LAYOUTS: { layout: PaneLayout; label: string; title: string; stub: bo
   { layout: "quad",    label: "⊞", title: "4-pane quad",     stub: true },
 ];
 
+const CAMERA_MODES: { mode: CameraMode; label: string; title: string }[] = [
+  { mode: "2d", label: "2D", title: "2D mode — left drag: pan, right drag: tilt" },
+  { mode: "3d", label: "3D", title: "3D mode — left drag: tilt, right drag: pan" },
+];
+
 export function CanvasButtons() {
   const { sendCommand, uiState } = useWasm();
   const currentMode = uiState.render_mode;
+  const [cameraMode, setCameraMode] = useState<CameraMode>("2d");
 
-  function setMode(mode: RenderMode) {
+  function setRenderMode(mode: RenderMode) {
     sendCommand({ type: "SetRenderMode", mode });
+  }
+
+  function setCamMode(mode: CameraMode) {
+    setCameraMode(mode);
+    sendCommand({ type: "SetCameraMode", mode });
   }
 
   return (
@@ -33,7 +46,19 @@ export function CanvasButtons() {
             key={mode}
             title={title}
             active={currentMode === mode}
-            onClick={() => setMode(mode)}
+            onClick={() => setRenderMode(mode)}
+          >
+            {label}
+          </IconButton>
+        ))}
+      </ButtonGroup>
+      <ButtonGroup>
+        {CAMERA_MODES.map(({ mode, label, title }) => (
+          <IconButton
+            key={mode}
+            title={title}
+            active={cameraMode === mode}
+            onClick={() => setCamMode(mode)}
           >
             {label}
           </IconButton>

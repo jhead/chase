@@ -3,6 +3,17 @@ use bevy::{
     prelude::*,
 };
 
+/// Controls which mouse button pans vs. tilts (orbits).
+///
+/// - `Pan2D`: left drag = pan, right drag = tilt (map-like, default)
+/// - `Tilt3D`: left drag = tilt, right drag = pan (Blender-like)
+#[derive(Resource, Default, Debug, PartialEq, Eq, Clone, Copy)]
+pub enum CameraMode {
+    #[default]
+    Pan2D,
+    Tilt3D,
+}
+
 #[derive(Component)]
 pub struct OrbitCamera {
     /// World-space point the camera orbits around.
@@ -13,6 +24,8 @@ pub struct OrbitCamera {
     pub yaw: f32,
     /// Vertical tilt in radians. 0 = horizon, PI/2 = straight down.
     pub pitch: f32,
+    /// World-space grab point for pixel-perfect pan; cleared when pan button released.
+    pan_grab: Option<Vec3>,
 }
 
 impl Default for OrbitCamera {
@@ -20,8 +33,9 @@ impl Default for OrbitCamera {
         Self {
             focus: Vec3::ZERO,
             radius: 400_000.0, // 400km — full overview of a ~250km radar range
-            yaw: 0.3,
-            pitch: 1.1, // ~63° from horizontal — nice perspective
+            yaw: 0.0,          // compass north, no rotation
+            pitch: std::f32::consts::FRAC_PI_2 - 0.02, // nearly top-down (~89°)
+            pan_grab: None,
         }
     }
 }
@@ -42,7 +56,8 @@ pub struct OrbitCameraPlugin;
 
 impl Plugin for OrbitCameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_camera)
+        app.init_resource::<CameraMode>()
+            .add_systems(Startup, spawn_camera)
             .add_systems(Update, orbit_camera_system);
     }
 }
@@ -65,12 +80,14 @@ pub fn spawn_camera(mut commands: Commands) {
 }
 
 fn orbit_camera_system(
-    mut query: Query<(&mut OrbitCamera, &mut Transform)>,
+    mut query: Query<(&mut OrbitCamera, &mut Transform, &Camera, &GlobalTransform)>,
     mouse: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
     buttons: Res<ButtonInput<MouseButton>>,
+    mode: Res<CameraMode>,
+    windows: Query<&Window>,
 ) {
-    let Ok((mut cam, mut transform)) = query.single_mut() else {
+    let Ok((mut cam, mut transform, camera, global_transform)) = query.single_mut() else {
         return;
     };
 
@@ -84,19 +101,37 @@ fn orbit_camera_system(
         cam.radius = cam.radius.clamp(1_000.0, 5_000_000.0);
     }
 
-    // Left drag: orbit
-    if buttons.pressed(MouseButton::Left) && mouse.delta != Vec2::ZERO {
+    let (tilt_button, pan_button) = match *mode {
+        CameraMode::Pan2D  => (MouseButton::Right, MouseButton::Left),
+        CameraMode::Tilt3D => (MouseButton::Left,  MouseButton::Right),
+    };
+
+    // Tilt: delta-based rotation
+    if buttons.pressed(tilt_button) && mouse.delta != Vec2::ZERO {
         cam.yaw -= mouse.delta.x * 0.005;
         cam.pitch += mouse.delta.y * 0.005;
         cam.pitch = cam.pitch.clamp(0.05, std::f32::consts::FRAC_PI_2 - 0.01);
     }
-    // Right drag: pan (translate focus on the XZ plane)
-    else if buttons.pressed(MouseButton::Right) && mouse.delta != Vec2::ZERO {
-        let pan_speed = cam.radius * 0.001;
-        let right = Vec3::new(cam.yaw.cos(), 0.0, -cam.yaw.sin());
-        let forward_xz = Vec3::new(-cam.yaw.sin(), 0.0, -cam.yaw.cos());
-        cam.focus += right * (-mouse.delta.x * pan_speed);
-        cam.focus += forward_xz * (-mouse.delta.y * pan_speed);
+
+    // Pan: ray-plane intersection so the grabbed world point stays under the cursor
+    if buttons.pressed(pan_button) {
+        if let Ok(window) = windows.single() {
+            if let Some(cursor) = window.cursor_position() {
+                if let Ok(ray) = camera.viewport_to_world(global_transform, cursor) {
+                    let plane_origin = cam.focus;
+                    if let Some(t) = ray.intersect_plane(plane_origin, InfinitePlane3d::new(Vec3::Y)) {
+                        let world_pos = ray.get_point(t);
+                        if let Some(grab) = cam.pan_grab {
+                            cam.focus += grab - world_pos;
+                        } else {
+                            cam.pan_grab = Some(world_pos);
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        cam.pan_grab = None;
     }
 
     *transform = cam.to_transform();
