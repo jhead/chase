@@ -126,6 +126,24 @@ export function Sidebar() {
           />
         </Section>
       )}
+
+      {/* Reflectivity threshold */}
+      <Section>
+        <SliderHeader>
+          <SectionLabel>Min dBZ</SectionLabel>
+          <SliderValue>{Math.round(uiState.threshold_dbz)} dBZ</SliderValue>
+        </SliderHeader>
+        <Slider
+          type="range"
+          min={-10}
+          max={75}
+          step={1}
+          value={uiState.threshold_dbz}
+          onChange={(e) =>
+            sendCommand({ type: "SetThreshold", dbz: Number(e.target.value) })
+          }
+        />
+      </Section>
     </Panel>
   );
 }

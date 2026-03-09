@@ -48,6 +48,7 @@ pub enum JsCommand {
     SetRenderMode(RenderMode),
     ResetCamera,
     SetElevationCount(u32),
+    SetThreshold(f32),
 }
 
 impl JsCommand {
@@ -62,6 +63,10 @@ impl JsCommand {
             "SetElevationCount" => {
                 let count = v["count"].as_u64()? as u32;
                 Some(JsCommand::SetElevationCount(count))
+            }
+            "SetThreshold" => {
+                let dbz = v["dbz"].as_f64()? as f32;
+                Some(JsCommand::SetThreshold(dbz))
             }
             _ => None,
         }
@@ -82,6 +87,7 @@ pub struct UiState {
     pub active_site: Option<String>,
     pub elevation_count: u32,
     pub elevation_total: u32,
+    pub threshold_dbz: f32,
 }
 
 /// Tracks how many elevation sweeps to display (current) and how many are loaded (total).
@@ -89,6 +95,16 @@ pub struct UiState {
 pub struct ElevationCount {
     pub current: u32,
     pub total: u32,
+}
+
+/// Minimum dBZ value to render. Fragments below this are discarded in the shader.
+#[derive(Resource)]
+pub struct ThresholdDbz(pub f32);
+
+impl Default for ThresholdDbz {
+    fn default() -> Self {
+        Self(10.0)
+    }
 }
 
 /// Injected by nexrad-web with a closure that serializes `UiState` and calls the
@@ -236,6 +252,7 @@ impl Plugin for RadarPlugin {
             .init_resource::<UiStateResource>()
             .init_resource::<CurrentSiteWorldPos>()
             .init_resource::<ElevationCount>()
+            .init_resource::<ThresholdDbz>()
             .add_plugins(BasemapPlugin)
             .add_plugins(OrbitCameraPlugin)
             .add_plugins(MaterialPlugin::<RadarMaterial>::default())
@@ -313,6 +330,7 @@ fn spawn_elevation_entities(
     scans: &[ElevationScan],
     mode: &RenderMode,
     elev_count: &ElevationCount,
+    threshold: &ThresholdDbz,
     site_offset: Vec3,
 ) {
     let bounds = slab_bounds(scans);
@@ -321,6 +339,7 @@ fn spawn_elevation_entities(
         let texture = create_reflectivity_texture(images, scan);
         let material = materials.add(RadarMaterial {
             reflectivity_texture: texture,
+            params: Vec4::new(threshold.0, 0.0, 0.0, 0.0),
         });
         let visible = mode.shows_sweeps() && (i as u32) < elev_count.current;
         commands.spawn((
@@ -350,6 +369,7 @@ fn receive_radar_data(
     mut site_world_pos: ResMut<CurrentSiteWorldPos>,
     mut camera: Query<&mut OrbitCamera>,
     mut elev_count: ResMut<ElevationCount>,
+    threshold: Res<ThresholdDbz>,
 ) {
     let Ok(volume) = channel.0.try_recv() else {
         return;
@@ -393,6 +413,7 @@ fn receive_radar_data(
         &scans,
         &mode,
         &elev_count,
+        &threshold,
         offset,
     );
 
@@ -406,6 +427,7 @@ fn receive_radar_data(
     ui_state.0.active_site = Some(volume.site.clone());
     ui_state.0.elevation_count = elev_count.current;
     ui_state.0.elevation_total = elev_count.total;
+    ui_state.0.threshold_dbz = threshold.0;
     notifier.notify(&ui_state.0);
 }
 
@@ -505,6 +527,9 @@ fn drain_js_commands(
     mut ui_state: ResMut<UiStateResource>,
     status: Res<LoadStatus>,
     mut elev_count: ResMut<ElevationCount>,
+    mut threshold: ResMut<ThresholdDbz>,
+    elev_material_handles: Query<&MeshMaterial3d<RadarMaterial>, With<RadarElevation>>,
+    mut radar_materials: ResMut<Assets<RadarMaterial>>,
 ) {
     while let Ok(cmd) = receiver.0.try_recv() {
         match cmd {
@@ -528,6 +553,16 @@ fn drain_js_commands(
                 }
                 ui_state.0.elevation_count = elev_count.current;
                 ui_state.0.elevation_total = elev_count.total;
+                notifier.notify(&ui_state.0);
+            }
+            JsCommand::SetThreshold(dbz) => {
+                threshold.0 = dbz;
+                for handle in &elev_material_handles {
+                    if let Some(mat) = radar_materials.get_mut(&handle.0) {
+                        mat.params.x = dbz;
+                    }
+                }
+                ui_state.0.threshold_dbz = dbz;
                 notifier.notify(&ui_state.0);
             }
             JsCommand::ResetCamera => {

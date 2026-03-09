@@ -20,6 +20,7 @@ export type JsCommand =
   | { type: "SetRenderMode"; mode: "sweeps" | "isosurface" | "combined" }
   | { type: "ResetCamera" }
   | { type: "SetElevationCount"; count: number }
+  | { type: "SetThreshold"; dbz: number }
   | { type: "SetPaneLayout"; layout: "single" | "split-h" | "split-v" | "quad" };
 
 /** Serializable state pushed from Bevy to React on meaningful changes. */
@@ -30,6 +31,7 @@ export interface UiState {
   active_site: string | null;
   elevation_count: number;
   elevation_total: number;
+  threshold_dbz: number;
 }
 
 const DEFAULT_UI_STATE: UiState = {
@@ -39,6 +41,7 @@ const DEFAULT_UI_STATE: UiState = {
   active_site: null,
   elevation_count: 0,
   elevation_total: 0,
+  threshold_dbz: 10,
 };
 
 // ── WASM singleton ────────────────────────────────────────────────────────────

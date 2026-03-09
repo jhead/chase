@@ -2,6 +2,8 @@
 
 @group(3) @binding(0) var reflectivity_texture: texture_2d<f32>;
 @group(3) @binding(1) var reflectivity_sampler: sampler;
+/// params.x = threshold_dbz (pixels below this are discarded)
+@group(3) @binding(2) var<uniform> params: vec4<f32>;
 
 fn nws_colormap(dbz: f32) -> vec3<f32> {
     if dbz < 5.0 {
@@ -42,7 +44,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let raw = textureSample(reflectivity_texture, reflectivity_sampler, in.uv).r;
     let dbz = raw * 75.0;
 
-    if dbz < 10.0 {
+    if dbz < params.x {
         discard;
     }
 

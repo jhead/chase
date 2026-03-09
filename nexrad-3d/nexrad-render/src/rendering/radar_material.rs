@@ -10,6 +10,10 @@ pub struct RadarMaterial {
     #[texture(0)]
     #[sampler(1)]
     pub reflectivity_texture: Handle<Image>,
+    /// Shader parameters packed into a vec4:
+    ///   x = threshold_dbz — pixels below this dBZ value are discarded.
+    #[uniform(2)]
+    pub params: Vec4,
 }
 
 impl Material for RadarMaterial {
