@@ -1,5 +1,5 @@
 use bevy::{asset::embedded_asset, light::GlobalAmbientLight, prelude::*};
-use nexrad_core::{isosurface::IsoMeshData, types::{ElevationScan, RadarVolume}};
+use nexrad_core::{isosurface::IsoMeshData, sites::RadarSite, types::{ElevationScan, RadarVolume}};
 use serde::Serialize;
 
 use crate::{
@@ -47,6 +47,7 @@ pub struct ExternalVolumeReceiver(pub async_channel::Receiver<RadarVolume>);
 pub enum JsCommand {
     SetRenderMode(RenderMode),
     ResetCamera,
+    SetElevationCount(u32),
 }
 
 impl JsCommand {
@@ -58,6 +59,10 @@ impl JsCommand {
                 Some(JsCommand::SetRenderMode(mode))
             }
             "ResetCamera" => Some(JsCommand::ResetCamera),
+            "SetElevationCount" => {
+                let count = v["count"].as_u64()? as u32;
+                Some(JsCommand::SetElevationCount(count))
+            }
             _ => None,
         }
     }
@@ -75,6 +80,15 @@ pub struct UiState {
     pub iso_loaded: bool,
     pub render_mode: String,
     pub active_site: Option<String>,
+    pub elevation_count: u32,
+    pub elevation_total: u32,
+}
+
+/// Tracks how many elevation sweeps to display (current) and how many are loaded (total).
+#[derive(Resource, Default)]
+pub struct ElevationCount {
+    pub current: u32,
+    pub total: u32,
 }
 
 /// Injected by nexrad-web with a closure that serializes `UiState` and calls the
@@ -100,9 +114,23 @@ pub struct IsoSurfaceChannel {
 #[derive(Resource, Default)]
 pub(crate) struct UiStateResource(pub UiState);
 
+/// World-space position of the currently loaded radar site.
+/// Shared between receive_radar_data and receive_isosurface_data so both place
+/// entities at the correct absolute position.
+#[derive(Resource, Default)]
+pub(crate) struct CurrentSiteWorldPos(pub Vec3);
+
+/// Fixed world origin — must match BasemapConfig default so geography aligns.
+const WORLD_ORIGIN_LAT: f64 = 36.0;
+const WORLD_ORIGIN_LNG: f64 = -98.0;
+
 /// Marks entities that are part of the current radar sweep volume.
 #[derive(Component)]
 pub struct RadarElevation;
+
+/// The sorted elevation index of this sweep (0 = lowest tilt).
+#[derive(Component)]
+pub struct ElevationIndex(pub u32);
 
 /// Marks entities that belong to the derived isosurface rendering mode.
 #[derive(Component)]
@@ -206,6 +234,8 @@ impl Plugin for RadarPlugin {
             .init_resource::<LoadStatus>()
             .init_resource::<StateNotifier>()
             .init_resource::<UiStateResource>()
+            .init_resource::<CurrentSiteWorldPos>()
+            .init_resource::<ElevationCount>()
             .add_plugins(BasemapPlugin)
             .add_plugins(OrbitCameraPlugin)
             .add_plugins(MaterialPlugin::<RadarMaterial>::default())
@@ -281,21 +311,25 @@ fn spawn_elevation_entities(
     materials: &mut Assets<RadarMaterial>,
     images: &mut Assets<Image>,
     scans: &[ElevationScan],
-    visibility: Visibility,
+    mode: &RenderMode,
+    elev_count: &ElevationCount,
+    site_offset: Vec3,
 ) {
     let bounds = slab_bounds(scans);
-    for (scan, (lower, upper)) in scans.iter().zip(bounds.iter()) {
+    for (i, (scan, (lower, upper))) in scans.iter().zip(bounds.iter()).enumerate() {
         let mesh = build_elevation_mesh(scan, *lower, *upper);
         let texture = create_reflectivity_texture(images, scan);
         let material = materials.add(RadarMaterial {
             reflectivity_texture: texture,
         });
+        let visible = mode.shows_sweeps() && (i as u32) < elev_count.current;
         commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(material),
-            Transform::default(),
-            visibility,
+            Transform::from_translation(site_offset),
+            if visible { Visibility::Visible } else { Visibility::Hidden },
             RadarElevation,
+            ElevationIndex(i as u32),
         ));
     }
 }
@@ -313,6 +347,9 @@ fn receive_radar_data(
     mut status: ResMut<LoadStatus>,
     notifier: Res<StateNotifier>,
     mut ui_state: ResMut<UiStateResource>,
+    mut site_world_pos: ResMut<CurrentSiteWorldPos>,
+    mut camera: Query<&mut OrbitCamera>,
+    mut elev_count: ResMut<ElevationCount>,
 ) {
     let Ok(volume) = channel.0.try_recv() else {
         return;
@@ -325,23 +362,38 @@ fn receive_radar_data(
         commands.entity(entity).despawn();
     }
 
+    // Compute absolute world position of this radar site and move camera to it.
+    let offset = if let Some(site) = RadarSite::lookup(&volume.site) {
+        let (x, _, z) = nexrad_core::geo::wgs84_to_bevy(
+            site.lat, site.lng, WORLD_ORIGIN_LAT, WORLD_ORIGIN_LNG,
+        );
+        Vec3::new(x, 0.0, z)
+    } else {
+        Vec3::ZERO
+    };
+    site_world_pos.0 = offset;
+    if let Ok(mut cam) = camera.single_mut() {
+        cam.focus = offset;
+    }
+
     let mut scans = volume.elevations;
     scans.sort_by(|a, b| {
         a.elevation_angle
             .partial_cmp(&b.elevation_angle)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    elev_count.total = scans.len() as u32;
+    elev_count.current = scans.len() as u32;
+
     spawn_elevation_entities(
         &mut commands,
         &mut meshes,
         &mut materials,
         &mut images,
         &scans,
-        if mode.shows_sweeps() {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        },
+        &mode,
+        &elev_count,
+        offset,
     );
 
     kick_off_isosurface(iso_channel.tx.clone(), scans.clone());
@@ -349,9 +401,11 @@ fn receive_radar_data(
     log::info!("loaded {} elevation sweeps from {}", scans.len(), volume.site);
     status.radar_loaded = true;
     ui_state.0.radar_loaded = true;
-    ui_state.0.iso_loaded = false; // reset iso until new isosurface arrives
+    ui_state.0.iso_loaded = false;
     ui_state.0.render_mode = mode.label().to_string();
     ui_state.0.active_site = Some(volume.site.clone());
+    ui_state.0.elevation_count = elev_count.current;
+    ui_state.0.elevation_total = elev_count.total;
     notifier.notify(&ui_state.0);
 }
 
@@ -388,6 +442,7 @@ fn receive_isosurface_data(
     mut status: ResMut<LoadStatus>,
     notifier: Res<StateNotifier>,
     mut ui_state: ResMut<UiStateResource>,
+    site_world_pos: Res<CurrentSiteWorldPos>,
 ) {
     let Ok(surfaces) = iso_channel.rx.try_recv() else {
         return;
@@ -409,7 +464,7 @@ fn receive_isosurface_data(
         commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(material),
-            Transform::default(),
+            Transform::from_translation(site_world_pos.0),
             iso_visibility,
             RadarIsoSurface,
         ));
@@ -423,13 +478,17 @@ fn receive_isosurface_data(
 
 fn apply_render_mode(
     mode: &RenderMode,
-    sweeps: &mut Query<&mut Visibility, (With<RadarElevation>, Without<RadarIsoSurface>)>,
+    sweeps: &mut Query<(&mut Visibility, &ElevationIndex), (With<RadarElevation>, Without<RadarIsoSurface>)>,
     isos: &mut Query<&mut Visibility, (With<RadarIsoSurface>, Without<RadarElevation>)>,
+    elev_count: &ElevationCount,
 ) {
-    let sweeps_visible = mode.shows_sweeps();
     let isos_visible = mode.shows_isosurface();
-    for mut v in sweeps.iter_mut() {
-        *v = if sweeps_visible { Visibility::Visible } else { Visibility::Hidden };
+    for (mut v, idx) in sweeps.iter_mut() {
+        *v = if mode.shows_sweeps() && idx.0 < elev_count.current {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for mut v in isos.iter_mut() {
         *v = if isos_visible { Visibility::Visible } else { Visibility::Hidden };
@@ -440,26 +499,42 @@ fn drain_js_commands(
     receiver: Res<JsCommandReceiver>,
     mut mode: ResMut<RenderMode>,
     mut camera: Query<&mut OrbitCamera>,
-    mut sweeps: Query<&mut Visibility, (With<RadarElevation>, Without<RadarIsoSurface>)>,
+    mut sweeps: Query<(&mut Visibility, &ElevationIndex), (With<RadarElevation>, Without<RadarIsoSurface>)>,
     mut isos: Query<&mut Visibility, (With<RadarIsoSurface>, Without<RadarElevation>)>,
     notifier: Res<StateNotifier>,
     mut ui_state: ResMut<UiStateResource>,
     status: Res<LoadStatus>,
+    mut elev_count: ResMut<ElevationCount>,
 ) {
     while let Ok(cmd) = receiver.0.try_recv() {
         match cmd {
             JsCommand::SetRenderMode(new_mode) => {
                 *mode = new_mode;
-                apply_render_mode(&mode, &mut sweeps, &mut isos);
+                apply_render_mode(&mode, &mut sweeps, &mut isos, &elev_count);
                 log::info!("JS set render mode: {}", mode.label());
                 ui_state.0.render_mode = mode.label().to_string();
                 ui_state.0.radar_loaded = status.radar_loaded;
                 ui_state.0.iso_loaded = status.iso_loaded;
                 notifier.notify(&ui_state.0);
             }
+            JsCommand::SetElevationCount(count) => {
+                elev_count.current = count.min(elev_count.total);
+                for (mut v, idx) in sweeps.iter_mut() {
+                    *v = if mode.shows_sweeps() && idx.0 < elev_count.current {
+                        Visibility::Visible
+                    } else {
+                        Visibility::Hidden
+                    };
+                }
+                ui_state.0.elevation_count = elev_count.current;
+                ui_state.0.elevation_total = elev_count.total;
+                notifier.notify(&ui_state.0);
+            }
             JsCommand::ResetCamera => {
                 if let Ok(mut cam) = camera.single_mut() {
+                    let focus = cam.focus; // keep current site focus
                     *cam = OrbitCamera::default();
+                    cam.focus = focus;
                 }
             }
         }
@@ -469,18 +544,19 @@ fn drain_js_commands(
 fn toggle_render_mode(
     keys: Res<ButtonInput<KeyCode>>,
     mut mode: ResMut<RenderMode>,
-    mut sweeps: Query<&mut Visibility, (With<RadarElevation>, Without<RadarIsoSurface>)>,
+    mut sweeps: Query<(&mut Visibility, &ElevationIndex), (With<RadarElevation>, Without<RadarIsoSurface>)>,
     mut isos: Query<&mut Visibility, (With<RadarIsoSurface>, Without<RadarElevation>)>,
     notifier: Res<StateNotifier>,
     mut ui_state: ResMut<UiStateResource>,
     status: Res<LoadStatus>,
+    elev_count: Res<ElevationCount>,
 ) {
     if !keys.just_pressed(KeyCode::KeyV) {
         return;
     }
 
     *mode = mode.next();
-    apply_render_mode(&mode, &mut sweeps, &mut isos);
+    apply_render_mode(&mode, &mut sweeps, &mut isos, &elev_count);
 
     log::info!(
         "render mode: {} (press V to cycle sweeps → isosurface → combined)",

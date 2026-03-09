@@ -15,7 +15,7 @@ export function Sidebar() {
   const [expanded, setExpanded] = useState(true);
   const [search, setSearch] = useState("");
   const [activeProduct, setActiveProduct] = useState("REF");
-  const { loadVolume, uiState } = useWasm();
+  const { loadVolume, uiState, sendCommand } = useWasm();
 
   const filtered = search.length >= 1
     ? RADAR_SITES.filter(
@@ -105,6 +105,27 @@ export function Sidebar() {
           IsoSurface
         </LayerRow>
       </Section>
+
+      {/* Elevation tilt count */}
+      {uiState.elevation_total > 0 && (
+        <Section>
+          <SliderHeader>
+            <SectionLabel>Tilts</SectionLabel>
+            <SliderValue>
+              {uiState.elevation_count} / {uiState.elevation_total}
+            </SliderValue>
+          </SliderHeader>
+          <Slider
+            type="range"
+            min={1}
+            max={uiState.elevation_total}
+            value={uiState.elevation_count}
+            onChange={(e) =>
+              sendCommand({ type: "SetElevationCount", count: Number(e.target.value) })
+            }
+          />
+        </Section>
+      )}
     </Panel>
   );
 }
@@ -263,6 +284,24 @@ const ProductBtn = styled.button<{ active?: boolean; disabled?: boolean }>`
   cursor: ${({ disabled }) => disabled ? "default" : "pointer"};
   opacity: ${({ disabled }) => disabled ? 0.4 : 1};
   &:hover:not(:disabled) { border-color: ${theme.accentHover}; }
+`;
+
+const SliderHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+`;
+
+const SliderValue = styled.span`
+  font-family: ${theme.fontMono};
+  font-size: 11px;
+  color: ${theme.accent};
+`;
+
+const Slider = styled.input`
+  width: 100%;
+  accent-color: ${theme.accent};
+  cursor: pointer;
 `;
 
 const LayerRow = styled.div<{ active?: boolean }>`

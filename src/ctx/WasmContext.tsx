@@ -19,7 +19,7 @@ export interface NexradWasm {
 export type JsCommand =
   | { type: "SetRenderMode"; mode: "sweeps" | "isosurface" | "combined" }
   | { type: "ResetCamera" }
-  | { type: "SetElevationIndex"; index: number }
+  | { type: "SetElevationCount"; count: number }
   | { type: "SetPaneLayout"; layout: "single" | "split-h" | "split-v" | "quad" };
 
 /** Serializable state pushed from Bevy to React on meaningful changes. */
@@ -28,6 +28,8 @@ export interface UiState {
   iso_loaded: boolean;
   render_mode: "sweeps" | "isosurface" | "combined";
   active_site: string | null;
+  elevation_count: number;
+  elevation_total: number;
 }
 
 const DEFAULT_UI_STATE: UiState = {
@@ -35,6 +37,8 @@ const DEFAULT_UI_STATE: UiState = {
   iso_loaded: false,
   render_mode: "sweeps",
   active_site: null,
+  elevation_count: 0,
+  elevation_total: 0,
 };
 
 // ── WASM singleton ────────────────────────────────────────────────────────────
