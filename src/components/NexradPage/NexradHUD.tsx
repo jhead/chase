@@ -4,19 +4,40 @@ import { TopBar } from "./TopBar";
 import { Sidebar } from "./Sidebar";
 import { CanvasButtons } from "./CanvasButtons";
 import { ReflectivityLegend } from "./ReflectivityLegend";
+import { ScrubBar } from "./ScrubBar";
+import { useRadarAnimation } from "../../hooks/useRadarAnimation";
 
 export function NexradHUD() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   void sidebarOpen; // used via Sidebar's own collapsed state for now
 
+  const anim = useRadarAnimation();
+
   return (
     <Root>
       {/* Top bar spans full width */}
-      <TopBar onSiteClick={() => setSidebarOpen((v) => !v)} />
+      <TopBar
+        onSiteClick={() => setSidebarOpen((v) => !v)}
+        animation={anim.state}
+        onTogglePlay={anim.togglePlay}
+        onPrevFrame={anim.prevFrame}
+        onNextFrame={anim.nextFrame}
+        onSeekFirst={() => anim.seekTo(0)}
+        onSeekLast={() => anim.seekTo(anim.state.frameCount - 1)}
+        onCycleSpeed={anim.cycleSpeed}
+      />
 
-      {/* Below top bar: sidebar + canvas area */}
+      {/* Scrub bar below top bar */}
+      <ScrubBar state={anim.state} onSeek={anim.seekTo} />
+
+      {/* Below top bar + scrub: sidebar + canvas area */}
       <Body>
-        <Sidebar />
+        <Sidebar
+          animationState={anim.state}
+          onSetSpeed={anim.setSpeed}
+          onToggleLoop={anim.toggleLoop}
+          onSelectSite={anim.init}
+        />
         <CanvasArea>
           {/* Blender-style corner buttons */}
           <CanvasButtons />

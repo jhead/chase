@@ -3,6 +3,7 @@ import styled from "@emotion/styled";
 import { RADAR_SITES } from "../../data/radarSites";
 import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
+import type { AnimationState } from "../../hooks/useRadarAnimation";
 
 const PRODUCTS = [
   { id: "REF", label: "Reflectivity", available: true },
@@ -11,11 +12,18 @@ const PRODUCTS = [
   { id: "ZDR", label: "Diff. Refl.",  available: false },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  animationState: AnimationState;
+  onSetSpeed: (speed: number) => void;
+  onToggleLoop: () => void;
+  onSelectSite: (siteId: string) => void;
+}
+
+export function Sidebar({ animationState, onSetSpeed, onToggleLoop, onSelectSite }: SidebarProps) {
   const [expanded, setExpanded] = useState(true);
   const [search, setSearch] = useState("");
   const [activeProduct, setActiveProduct] = useState("REF");
-  const { loadVolume, uiState, sendCommand } = useWasm();
+  const { uiState, sendCommand } = useWasm();
 
   const filtered = search.length >= 1
     ? RADAR_SITES.filter(
@@ -27,7 +35,7 @@ export function Sidebar() {
 
   function selectSite(siteId: string) {
     setSearch("");
-    loadVolume(siteId);
+    onSelectSite(siteId);
   }
 
   if (!expanded) {
@@ -144,6 +152,38 @@ export function Sidebar() {
           }
         />
       </Section>
+
+      {/* Animation */}
+      {animationState.ready && (
+        <Section>
+          <SectionLabel>Animation</SectionLabel>
+          <SliderHeader>
+            <SectionLabel style={{ fontSize: "11px", textTransform: "none" }}>Speed</SectionLabel>
+            <SliderValue>{animationState.speed}×</SliderValue>
+          </SliderHeader>
+          <Slider
+            type="range"
+            min={0.5}
+            max={4}
+            step={0.5}
+            value={animationState.speed}
+            onChange={(e) => onSetSpeed(Number(e.target.value))}
+          />
+          <LoopRow>
+            <LoopLabel>Loop</LoopLabel>
+            <LoopToggle
+              active={animationState.loop}
+              onClick={onToggleLoop}
+              title={animationState.loop ? "Loop enabled" : "Loop disabled"}
+            >
+              {animationState.loop ? "ON" : "OFF"}
+            </LoopToggle>
+          </LoopRow>
+          <FrameCountLabel>
+            {animationState.loadedFrames.size} / {animationState.frameCount} frames loaded
+          </FrameCountLabel>
+        </Section>
+      )}
     </Panel>
   );
 }
@@ -320,6 +360,36 @@ const Slider = styled.input`
   width: 100%;
   accent-color: ${theme.accent};
   cursor: pointer;
+`;
+
+const LoopRow = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+`;
+
+const LoopLabel = styled.span`
+  font-family: ${theme.fontSans};
+  font-size: 11px;
+  color: ${theme.textSecondary};
+`;
+
+const LoopToggle = styled.button<{ active?: boolean }>`
+  background: ${({ active }) => (active ? theme.bgActive : "rgba(255,255,255,0.04)")};
+  border: 1px solid ${({ active }) => (active ? theme.accent : theme.border)};
+  border-radius: ${theme.radius};
+  color: ${({ active }) => (active ? theme.accent : theme.textDim)};
+  font-family: ${theme.fontMono};
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+`;
+
+const FrameCountLabel = styled.span`
+  font-family: ${theme.fontMono};
+  font-size: 10px;
+  color: ${theme.textDim};
 `;
 
 const LayerRow = styled.div<{ active?: boolean }>`

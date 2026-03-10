@@ -55,14 +55,21 @@ const radarRoute = async (request: Request, env: Env): Promise<Response> => {
   const radarName = params.get("radar") || "KHTX";
   const date = params.get("date") || "2024/05/16";
   const volume = params.get("volume") === "1";
+  const frames = params.get("frames") === "1";
 
   // Use request origin so worker's self-fetch (list + get file) works when deployed
   const baseUrl = new URL(request.url).origin;
   const service = new RadarService(NOAA_LEVEL2_BUCKET, env.cache, baseUrl);
 
   try {
+    if (frames) {
+      const output = await service.getFrameList(date, radarName);
+      return Response.json(output, { headers: corsHeaders(request) });
+    }
     if (volume) {
-      const output = await service.getVolumeData(date, radarName);
+      const tiltsParam = params.get("tilts");
+      const maxTilts = tiltsParam ? parseInt(tiltsParam) : undefined;
+      const output = await service.getVolumeData(date, radarName, maxTilts);
       return Response.json(output, { headers: corsHeaders(request) });
     }
     const output = await service.getRadialData(date, radarName, frameIndex);

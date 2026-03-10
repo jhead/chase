@@ -7,35 +7,43 @@
 
 fn nws_colormap(dbz: f32) -> vec3<f32> {
     if dbz < 5.0 {
-        return vec3<f32>(0.0, 0.925, 0.925);
+        return vec3<f32>(0.188, 0.204, 0.227);
     } else if dbz < 10.0 {
-        return vec3<f32>(0.0, 0.925, 0.925);
+        return vec3<f32>(0.188, 0.235, 0.337);
     } else if dbz < 15.0 {
-        return vec3<f32>(0.004, 0.627, 0.965);
+        return vec3<f32>(0.302, 0.424, 0.518);
     } else if dbz < 20.0 {
-        return vec3<f32>(0.0, 0.0, 0.965);
+        return vec3<f32>(0.369, 0.671, 0.451);
     } else if dbz < 25.0 {
-        return vec3<f32>(0.0, 1.0, 0.0);
+        return vec3<f32>(0.227, 0.482, 0.180);
     } else if dbz < 30.0 {
-        return vec3<f32>(0.0, 0.784, 0.0);
+        return vec3<f32>(0.635, 0.745, 0.231);
     } else if dbz < 35.0 {
-        return vec3<f32>(0.0, 0.565, 0.0);
+        return vec3<f32>(0.898, 0.875, 0.286);
     } else if dbz < 40.0 {
-        return vec3<f32>(0.973, 0.973, 0.0);
+        return vec3<f32>(0.925, 0.600, 0.216);
     } else if dbz < 45.0 {
-        return vec3<f32>(0.906, 0.753, 0.0);
+        return vec3<f32>(0.780, 0.475, 0.173);
     } else if dbz < 50.0 {
-        return vec3<f32>(1.0, 0.565, 0.0);
+        return vec3<f32>(0.898, 0.243, 0.153);
     } else if dbz < 55.0 {
-        return vec3<f32>(1.0, 0.0, 0.0);
+        return vec3<f32>(0.690, 0.208, 0.137);
     } else if dbz < 60.0 {
-        return vec3<f32>(0.839, 0.0, 0.0);
+        return vec3<f32>(0.471, 0.184, 0.145);
     } else if dbz < 65.0 {
-        return vec3<f32>(0.753, 0.0, 0.0);
+        return vec3<f32>(0.725, 0.388, 0.573);
     } else if dbz < 70.0 {
-        return vec3<f32>(1.0, 0.0, 1.0);
+        return vec3<f32>(0.698, 0.188, 0.439);
+    } else if dbz < 75.0 {
+        return vec3<f32>(0.396, 0.129, 0.694);
+    } else if dbz < 80.0 {
+        return vec3<f32>(0.224, 0.071, 0.525);
+    } else if dbz < 85.0 {
+        return vec3<f32>(0.482, 0.733, 0.780);
+    } else if dbz < 90.0 {
+        return vec3<f32>(0.314, 0.459, 0.549);
     } else {
-        return vec3<f32>(0.6, 0.333, 0.788);
+        return vec3<f32>(0.412, 0.090, 0.043);
     }
 }
 

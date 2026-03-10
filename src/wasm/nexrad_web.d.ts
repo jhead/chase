@@ -26,3 +26,9 @@ export function send_command(json: string): void;
  * Called once after WASM init. The callback receives a JSON string matching UiState.
  */
 export function set_state_callback(cb: Function): void;
+
+/**
+ * Update the base elevation (tilt 0) texture in-place for animation.
+ * `data` is pre-quantized R8Unorm (0-255). Called from JS on each animation frame.
+ */
+export function update_base_texture(num_rays: number, num_gates: number, data: Uint8Array): void;

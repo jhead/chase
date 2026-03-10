@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -13,6 +13,7 @@ export interface NexradWasm {
   commit_volume: (site_id: string) => void;
   send_command: (json: string) => void;
   set_state_callback: (cb: (stateJson: string) => void) => void;
+  update_base_texture: (num_rays: number, num_gates: number, data: Uint8Array) => void;
 }
 
 /** Discriminated union of all commands JS can send to the Bevy renderer. */
@@ -71,18 +72,6 @@ function loadWasm(): Promise<NexradWasm> {
   return loadPromise;
 }
 
-const NEXRAD_API =
-  (import.meta as { env?: { VITE_NEXRAD_API_URL?: string } }).env?.VITE_NEXRAD_API_URL ??
-  "http://localhost:8787";
-
-function todayPath(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}/${m}/${day}`;
-}
-
 // ── Context ───────────────────────────────────────────────────────────────────
 
 interface WasmContextValue {
@@ -90,7 +79,6 @@ interface WasmContextValue {
   isReady: boolean;
   uiState: UiState;
   sendCommand: (cmd: JsCommand) => void;
-  loadVolume: (siteId: string) => Promise<void>;
 }
 
 const WasmContext = createContext<WasmContextValue>({
@@ -98,7 +86,6 @@ const WasmContext = createContext<WasmContextValue>({
   isReady: false,
   uiState: DEFAULT_UI_STATE,
   sendCommand: () => {},
-  loadVolume: async () => {},
 });
 
 export function useWasm() {
@@ -110,7 +97,6 @@ export function useWasm() {
 export function WasmProvider({ children }: { children: React.ReactNode }) {
   const [wasm, setWasm] = useState<NexradWasm | null>(null);
   const [uiState, setUiState] = useState<UiState>(DEFAULT_UI_STATE);
-  const lastSiteRef = useRef<string | null>(null);
 
   useEffect(() => {
     loadWasm()
@@ -131,51 +117,9 @@ export function WasmProvider({ children }: { children: React.ReactNode }) {
     wasmModule?.send_command(JSON.stringify(cmd));
   }
 
-  async function loadVolume(siteId: string) {
-    if (lastSiteRef.current === siteId) return;
-    lastSiteRef.current = siteId;
-
-    const mod = await loadWasm();
-    const date = todayPath();
-    const url = `${NEXRAD_API}?volume=1&date=${encodeURIComponent(date)}&radar=${encodeURIComponent(siteId)}`;
-
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Volume fetch failed: ${res.status}`);
-      const data = await res.json() as {
-        error?: string;
-        site?: string;
-        sweeps?: Array<{
-          elevation_angle: number;
-          gate_size_m: number;
-          first_gate_m: number;
-          azimuths: number[];
-          reflectivity: number[];
-        }>;
-      };
-      if (data.error) throw new Error(data.error);
-      const sweeps = data.sweeps ?? [];
-      if (sweeps.length === 0) return;
-
-      for (const s of sweeps) {
-        mod.add_scan(
-          s.elevation_angle,
-          s.gate_size_m,
-          s.first_gate_m,
-          new Float32Array(s.azimuths),
-          new Float32Array(s.reflectivity)
-        );
-      }
-      mod.commit_volume(data.site ?? siteId);
-    } catch (err) {
-      lastSiteRef.current = null; // allow retry
-      console.error("[WasmContext] Volume load failed:", err);
-    }
-  }
-
   return (
     <WasmContext.Provider
-      value={{ wasm, isReady: wasm !== null, uiState, sendCommand, loadVolume }}
+      value={{ wasm, isReady: wasm !== null, uiState, sendCommand }}
     >
       {children}
     </WasmContext.Provider>

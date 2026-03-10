@@ -72,7 +72,7 @@ export default class RadarService {
    * Each sweep: { elevation_angle, gate_size_m, first_gate_m, azimuths, reflectivity }.
    * reflectivity is Float32Array row-major, normalized 0–1 (dBZ/75).
    */
-  async getVolumeData(date: string, radarName: string): Promise<{
+  async getVolumeData(date: string, radarName: string, maxTilts?: number): Promise<{
     site: string;
     sweeps: Array<{
       elevation_angle: number;
@@ -109,6 +109,8 @@ export default class RadarService {
     }> = [];
 
     for (const elevNum of elevations) {
+      if (maxTilts !== undefined && sweeps.length >= maxTilts) break;
+
       radar.setElevation(elevNum);
       // getHighresReflectivity() returns HighResData[] (one object per ray),
       // not number[][]. Each HighResData has: gate_count, gate_size, first_gate, moment_data.
@@ -159,6 +161,26 @@ export default class RadarService {
     }
 
     return { site: radarName, sweeps };
+  }
+
+  /**
+   * Return sorted (ascending) V06 filenames with parsed timestamps for animation.
+   */
+  async getFrameList(
+    date: string,
+    radar: string
+  ): Promise<{ files: string[]; timestamps: string[]; count: number }> {
+    const allFiles = await this.listRadarFiles(date, radar);
+    // listRadarFiles returns descending; filter to V06 and reverse to ascending
+    const v06 = allFiles.filter((k) => k.endsWith("_V06")).reverse();
+    const timestamps = v06.map((f) => {
+      // Filename format: YYYY/MM/DD/SITE/SITE_YYYYMMDD_HHMMSS_V06
+      const match = f.match(/(\d{8})_(\d{6})_V06$/);
+      if (!match) return "";
+      const time = match[2]; // HHMMSS
+      return `${time.slice(0, 2)}:${time.slice(2, 4)}Z`;
+    });
+    return { files: v06, timestamps, count: v06.length };
   }
 
   async listRadarFiles(date: string, radar: string): Promise<string[]> {

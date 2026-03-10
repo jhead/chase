@@ -134,6 +134,22 @@ pub struct IsoSurfaceChannel {
     pub(crate) rx: async_channel::Receiver<Vec<IsoMeshData>>,
 }
 
+/// Holds the sorted elevation scans and tracks isosurface compute state.
+/// Used to derive isosurface on-demand when the user first toggles to iso mode.
+#[derive(Resource, Default)]
+pub(crate) struct IsoDerivationState {
+    pub scans: Vec<ElevationScan>,
+    pub computed: IsoComputeStatus,
+}
+
+#[derive(Default, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum IsoComputeStatus {
+    #[default]
+    NotStarted,
+    InProgress,
+    Done,
+}
+
 /// Current UI state mirrored from Bevy resources. Updated and pushed to JS on change.
 #[derive(Resource, Default)]
 pub(crate) struct UiStateResource(pub UiState);
@@ -156,9 +172,33 @@ pub struct RadarElevation;
 #[derive(Component)]
 pub struct ElevationIndex(pub u32);
 
+/// Marker for the base (tilt 0) elevation entity, used for fast animation texture swaps.
+#[derive(Component)]
+pub struct BaseElevationMarker;
+
 /// Marks entities that belong to the derived isosurface rendering mode.
 #[derive(Component)]
 pub struct RadarIsoSurface;
+
+// ── Animation frame types ──────────────────────────────────────────────────
+
+/// A single animation frame: pre-quantized R8Unorm reflectivity for tilt 0.
+pub struct AnimationFrame {
+    pub num_rays: usize,
+    pub num_gates: usize,
+    pub data: Vec<u8>,
+}
+
+/// Receives animation frames from JS via the ANIM_TX channel.
+#[derive(Resource)]
+pub struct AnimationFrameReceiver(pub async_channel::Receiver<AnimationFrame>);
+
+/// Tracks current base texture dimensions to detect when geometry changes.
+#[derive(Resource, Default)]
+pub struct BaseTextureDims {
+    pub num_rays: usize,
+    pub num_gates: usize,
+}
 
 // ── Render mode ───────────────────────────────────────────────────────────────
 
@@ -253,6 +293,11 @@ impl Plugin for RadarPlugin {
             app.add_systems(Update, drain_js_commands.before(toggle_render_mode));
         }
 
+        if app.world().get_resource::<AnimationFrameReceiver>().is_some() {
+            app.init_resource::<BaseTextureDims>()
+                .add_systems(Update, receive_animation_frame);
+        }
+
         app.insert_resource(IsoSurfaceChannel { tx: iso_tx, rx: iso_rx })
             .insert_resource(self.initial_mode)
             .init_resource::<LoadStatus>()
@@ -261,6 +306,7 @@ impl Plugin for RadarPlugin {
             .init_resource::<CurrentSiteWorldPos>()
             .init_resource::<ElevationCount>()
             .init_resource::<ThresholdDbz>()
+            .init_resource::<IsoDerivationState>()
             .add_plugins(BasemapPlugin)
             .add_plugins(OrbitCameraPlugin)
             .add_plugins(MaterialPlugin::<RadarMaterial>::default())
@@ -350,7 +396,7 @@ fn spawn_elevation_entities(
             params: Vec4::new(threshold.0, 0.0, 0.0, 0.0),
         });
         let visible = mode.shows_sweeps() && (i as u32) < elev_count.current;
-        commands.spawn((
+        let mut entity = commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(material),
             Transform::from_translation(site_offset),
@@ -358,6 +404,9 @@ fn spawn_elevation_entities(
             RadarElevation,
             ElevationIndex(i as u32),
         ));
+        if i == 0 {
+            entity.insert(BaseElevationMarker);
+        }
     }
 }
 
@@ -365,8 +414,6 @@ fn receive_radar_data(
     mut commands: Commands,
     channel: Res<RadarDataChannel>,
     old_elevations: Query<Entity, With<RadarElevation>>,
-    old_iso: Query<Entity, With<RadarIsoSurface>>,
-    iso_channel: Res<IsoSurfaceChannel>,
     mode: Res<RenderMode>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<RadarMaterial>>,
@@ -378,15 +425,13 @@ fn receive_radar_data(
     mut camera: Query<&mut OrbitCamera>,
     mut elev_count: ResMut<ElevationCount>,
     threshold: Res<ThresholdDbz>,
+    mut iso_derivation: ResMut<IsoDerivationState>,
 ) {
     let Ok(volume) = channel.0.try_recv() else {
         return;
     };
 
     for entity in &old_elevations {
-        commands.entity(entity).despawn();
-    }
-    for entity in &old_iso {
         commands.entity(entity).despawn();
     }
 
@@ -411,7 +456,8 @@ fn receive_radar_data(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     elev_count.total = scans.len() as u32;
-    elev_count.current = scans.len() as u32;
+    // Default to showing 1 tilt; user can increase via slider
+    elev_count.current = 1.min(scans.len() as u32);
 
     spawn_elevation_entities(
         &mut commands,
@@ -425,12 +471,17 @@ fn receive_radar_data(
         offset,
     );
 
-    kick_off_isosurface(iso_channel.tx.clone(), scans.clone());
+    // Store scans for on-demand isosurface derivation (no auto-compute).
+    // Isosurface will be derived lazily when the user first toggles to iso mode.
+    iso_derivation.scans = scans.clone();
+    iso_derivation.computed = IsoComputeStatus::NotStarted;
 
     log::info!("loaded {} elevation sweeps from {}", scans.len(), volume.site);
     status.radar_loaded = true;
+    // iso_loaded = true so the UI shows "Ready" (iso will be derived on-demand)
+    status.iso_loaded = true;
     ui_state.0.radar_loaded = true;
-    ui_state.0.iso_loaded = false;
+    ui_state.0.iso_loaded = true;
     ui_state.0.render_mode = mode.label().to_string();
     ui_state.0.active_site = Some(volume.site.clone());
     ui_state.0.elevation_count = elev_count.current;
@@ -469,10 +520,10 @@ fn receive_isosurface_data(
     mode: Res<RenderMode>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut iso_materials: ResMut<Assets<IsoSurfaceMaterial>>,
-    mut status: ResMut<LoadStatus>,
     notifier: Res<StateNotifier>,
     mut ui_state: ResMut<UiStateResource>,
     site_world_pos: Res<CurrentSiteWorldPos>,
+    mut iso_derivation: ResMut<IsoDerivationState>,
 ) {
     let Ok(surfaces) = iso_channel.rx.try_recv() else {
         return;
@@ -500,8 +551,8 @@ fn receive_isosurface_data(
         ));
     }
 
+    iso_derivation.computed = IsoComputeStatus::Done;
     log::info!("derived isosurface meshes generated");
-    status.iso_loaded = true;
     ui_state.0.iso_loaded = true;
     notifier.notify(&ui_state.0);
 }
@@ -539,10 +590,25 @@ fn drain_js_commands(
     elev_material_handles: Query<&MeshMaterial3d<RadarMaterial>, With<RadarElevation>>,
     mut radar_materials: ResMut<Assets<RadarMaterial>>,
     mut camera_mode: ResMut<CameraMode>,
+    mut iso_derivation: ResMut<IsoDerivationState>,
+    iso_channel: Res<IsoSurfaceChannel>,
 ) {
     while let Ok(cmd) = receiver.0.try_recv() {
         match cmd {
             JsCommand::SetRenderMode(new_mode) => {
+                // Kick off isosurface derivation on-demand if needed
+                if new_mode.shows_isosurface()
+                    && iso_derivation.computed == IsoComputeStatus::NotStarted
+                    && !iso_derivation.scans.is_empty()
+                {
+                    iso_derivation.computed = IsoComputeStatus::InProgress;
+                    kick_off_isosurface(
+                        iso_channel.tx.clone(),
+                        iso_derivation.scans.clone(),
+                    );
+                    log::info!("isosurface derivation started on-demand");
+                }
+
                 *mode = new_mode;
                 apply_render_mode(&mode, &mut sweeps, &mut isos, &elev_count);
                 log::info!("JS set render mode: {}", mode.label());
@@ -588,6 +654,68 @@ fn drain_js_commands(
     }
 }
 
+fn receive_animation_frame(
+    receiver: Res<AnimationFrameReceiver>,
+    base_query: Query<&MeshMaterial3d<RadarMaterial>, With<BaseElevationMarker>>,
+    mut radar_materials: ResMut<Assets<RadarMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut dims: ResMut<BaseTextureDims>,
+) {
+    let Ok(frame) = receiver.0.try_recv() else {
+        return;
+    };
+
+    let Ok(mat_handle) = base_query.single() else {
+        return;
+    };
+
+    let Some(mat) = radar_materials.get_mut(&mat_handle.0) else {
+        return;
+    };
+
+    let tex_handle = &mat.reflectivity_texture;
+
+    if frame.num_rays == dims.num_rays && frame.num_gates == dims.num_gates {
+        // Fast path: overwrite image data in-place (GPU re-upload next frame)
+        if let Some(image) = images.get_mut(tex_handle) {
+            image.data = Some(frame.data);
+        }
+    } else {
+        // Slow path: dimensions changed, create a new Image
+        use bevy::{
+            asset::RenderAssetUsages,
+            image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
+            render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+        };
+
+        let mut image = Image::new(
+            Extent3d {
+                width: frame.num_gates as u32,
+                height: frame.num_rays as u32,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            frame.data,
+            TextureFormat::R8Unorm,
+            RenderAssetUsages::RENDER_WORLD,
+        );
+        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+            mag_filter: ImageFilterMode::Nearest,
+            min_filter: ImageFilterMode::Nearest,
+            ..default()
+        });
+
+        let new_handle = images.add(image);
+        // Update material to point to new texture
+        if let Some(mat) = radar_materials.get_mut(&mat_handle.0) {
+            mat.reflectivity_texture = new_handle;
+        }
+
+        dims.num_rays = frame.num_rays;
+        dims.num_gates = frame.num_gates;
+    }
+}
+
 fn toggle_render_mode(
     keys: Res<ButtonInput<KeyCode>>,
     mut mode: ResMut<RenderMode>,
@@ -597,12 +725,26 @@ fn toggle_render_mode(
     mut ui_state: ResMut<UiStateResource>,
     status: Res<LoadStatus>,
     elev_count: Res<ElevationCount>,
+    mut iso_derivation: ResMut<IsoDerivationState>,
+    iso_channel: Res<IsoSurfaceChannel>,
 ) {
     if !keys.just_pressed(KeyCode::KeyV) {
         return;
     }
 
-    *mode = mode.next();
+    let new_mode = mode.next();
+
+    // Kick off isosurface derivation on-demand if needed
+    if new_mode.shows_isosurface()
+        && iso_derivation.computed == IsoComputeStatus::NotStarted
+        && !iso_derivation.scans.is_empty()
+    {
+        iso_derivation.computed = IsoComputeStatus::InProgress;
+        kick_off_isosurface(iso_channel.tx.clone(), iso_derivation.scans.clone());
+        log::info!("isosurface derivation started on-demand (keyboard)");
+    }
+
+    *mode = new_mode;
     apply_render_mode(&mode, &mut sweeps, &mut isos, &elev_count);
 
     log::info!(

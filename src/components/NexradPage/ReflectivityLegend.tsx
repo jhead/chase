@@ -5,7 +5,7 @@ const gradient = NWS_COLORS.map(
   ({ color }, i) => `${color} ${(i / (NWS_COLORS.length - 1)) * 100}%`
 ).join(", ");
 
-const tickDbz = [-10, 0, 10, 20, 30, 40, 50, 60, 70];
+const tickDbz = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90];
 
 export function ReflectivityLegend() {
   const min = NWS_COLORS[0].dbz;

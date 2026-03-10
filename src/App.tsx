@@ -9,7 +9,6 @@ import { WasmProvider } from "./ctx/WasmContext";
 import { Chaser } from "./services/chasers";
 
 import { ResizablePane, ResizablePanes } from "./components/ResizablePanes";
-import { Radar } from "./components/Radar/Radar";
 import { NexradPage } from "./components/NexradPage";
 import { RadarSite } from "./components/ChaserMap";
 
@@ -49,7 +48,7 @@ function App() {
     return (
       <WasmProvider>
         <PersistentCanvas />
-        <Radar radarSite={selectedRadar} />
+        <NexradPage />
       </WasmProvider>
     );
   }
@@ -69,7 +68,7 @@ function App() {
                   selectedRadar={selectedRadar}
                   onRadarSelect={setSelectedRadar}
                 />
-                <Radar radarSite={selectedRadar} />
+
               </ResizablePane.Right>
             ) : null}
           </ResizablePanes>
