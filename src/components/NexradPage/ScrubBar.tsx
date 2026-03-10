@@ -8,6 +8,25 @@ interface ScrubBarProps {
   onSeek: (index: number) => void;
 }
 
+/** Return the loaded frame index closest to rawIndex, or null if none. */
+function nearestLoadedIndex(
+  loadedFrames: Set<number>,
+  rawIndex: number
+): number | null {
+  if (loadedFrames.size === 0) return null;
+  const sorted = [...loadedFrames].sort((a, b) => a - b);
+  let best = sorted[0];
+  let bestDist = Math.abs(sorted[0] - rawIndex);
+  for (const i of sorted) {
+    const d = Math.abs(i - rawIndex);
+    if (d < bestDist) {
+      bestDist = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
 export function ScrubBar({ state, onSeek }: ScrubBarProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -29,37 +48,43 @@ export function ScrubBar({ state, onSeek }: ScrubBarProps) {
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (frameCount === 0) return;
+      const raw = indexFromX(e.clientX);
+      const target = nearestLoadedIndex(loadedFrames, raw);
+      if (target !== null) {
+        onSeek(target);
+      }
       setDragging(true);
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
-      const idx = indexFromX(e.clientX);
-      onSeek(idx);
+      trackRef.current?.setPointerCapture(e.pointerId);
     },
-    [frameCount, indexFromX, onSeek]
+    [frameCount, indexFromX, loadedFrames, onSeek]
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
-      const idx = indexFromX(e.clientX);
-      setHoverIndex(idx);
+      const raw = indexFromX(e.clientX);
+      setHoverIndex(raw);
       if (dragging) {
-        onSeek(idx);
+        const target = nearestLoadedIndex(loadedFrames, raw);
+        if (target !== null) onSeek(target);
       }
     },
-    [dragging, indexFromX, onSeek]
+    [dragging, indexFromX, loadedFrames, onSeek]
   );
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    trackRef.current?.releasePointerCapture(e.pointerId);
     setDragging(false);
   }, []);
 
-  const handlePointerLeave = useCallback(() => {
+  const handlePointerLeave = useCallback((e: React.PointerEvent) => {
     setHoverIndex(null);
+    trackRef.current?.releasePointerCapture(e.pointerId);
     setDragging(false);
   }, []);
 
   if (frameCount === 0) return null;
 
-  const playheadPct = (frameIndex / Math.max(1, frameCount - 1)) * 100;
+  const denom = Math.max(1, frameCount - 1);
 
   return (
     <Track
@@ -69,28 +94,35 @@ export function ScrubBar({ state, onSeek }: ScrubBarProps) {
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerLeave}
     >
-      {/* Loaded frame segments */}
-      <LoadedOverlay>
-        {Array.from(loadedFrames).map((idx) => {
-          const left = (idx / Math.max(1, frameCount - 1)) * 100;
-          const width = (1 / Math.max(1, frameCount - 1)) * 100;
-          return (
-            <LoadedSegment
-              key={idx}
-              style={{ left: `${left}%`, width: `${Math.max(width, 0.5)}%` }}
-            />
-          );
-        })}
-      </LoadedOverlay>
+      {/* Ghost ticks for full timeline length */}
+      {frameCount > 1 &&
+        Array.from({ length: frameCount }, (_, i) => (
+          <GhostTick
+            key={i}
+            style={{
+              left: `${(i / denom) * 100}%`,
+            }}
+          />
+        ))}
 
-      {/* Playhead */}
-      <Playhead style={{ left: `${playheadPct}%` }} />
+      {/* Loaded frame pills */}
+      {Array.from(loadedFrames).map((idx) => {
+        const leftPct = (idx / denom) * 100;
+        const isCurrent = idx === frameIndex;
+        return (
+          <FramePill
+            key={idx}
+            style={{ left: `${leftPct}%` }}
+            isCurrent={isCurrent}
+          />
+        );
+      })}
 
       {/* Hover tooltip */}
-      {hoverIndex !== null && timestamps[hoverIndex] && (
+      {hoverIndex !== null && timestamps[hoverIndex] !== undefined && (
         <Tooltip
           style={{
-            left: `${(hoverIndex / Math.max(1, frameCount - 1)) * 100}%`,
+            left: `${(hoverIndex / denom) * 100}%`,
           }}
         >
           {timestamps[hoverIndex]}
@@ -111,34 +143,36 @@ const Track = styled.div`
   user-select: none;
 `;
 
-const LoadedOverlay = styled.div`
+const GhostTick = styled.div`
   position: absolute;
-  inset: 0;
-`;
-
-const LoadedSegment = styled.div`
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: ${theme.accent};
-  opacity: 0.6;
-`;
-
-const Playhead = styled.div`
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: #fff;
-  transform: translateX(-1px);
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 1px;
+  height: 6px;
+  background: ${theme.border};
+  opacity: 0.5;
   pointer-events: none;
-  z-index: 1;
+`;
+
+const FramePill = styled.div<{ isCurrent: boolean }>`
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%)
+    ${({ isCurrent }) => (isCurrent ? "scale(1.15)" : "scale(1)")};
+  width: 8px;
+  height: 12px;
+  border-radius: 4px;
+  background: ${theme.accent};
+  opacity: ${({ isCurrent }) => (isCurrent ? 1 : 0.45)};
+  pointer-events: none;
+  transition: opacity 0.1s ease, transform 0.1s ease;
 `;
 
 const Tooltip = styled.div`
   position: absolute;
   bottom: 100%;
   transform: translateX(-50%);
+  margin-bottom: 4px;
   background: ${theme.bg};
   border: 1px solid ${theme.border};
   border-radius: ${theme.radius};

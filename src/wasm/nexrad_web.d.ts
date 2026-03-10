@@ -30,5 +30,6 @@ export function set_state_callback(cb: Function): void;
 /**
  * Update the base elevation (tilt 0) texture in-place for animation.
  * `data` is pre-quantized R8Unorm (0-255). Called from JS on each animation frame.
+ * Overwrites the shared slot so Bevy always sees the latest frame (no queue lag).
  */
 export function update_base_texture(num_rays: number, num_gates: number, data: Uint8Array): void;

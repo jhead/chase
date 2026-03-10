@@ -5,7 +5,7 @@ pub mod rendering;
 
 pub use basemap::BasemapConfig;
 pub use plugin::{
-    AnimationFrame, AnimationFrameReceiver, BaseTextureDims,
+    AnimationFrame, AnimationFrameSlot, BaseTextureDims,
     ElevationCount, ExternalVolumeReceiver, IsoSurfaceChannel, JsCommand, JsCommandReceiver,
     LoadStatus, RadarPlugin, RadarVolumeSender, RenderMode, StateNotifier, UiState,
 };

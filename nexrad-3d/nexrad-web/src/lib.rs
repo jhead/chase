@@ -2,10 +2,10 @@ use async_channel::Sender;
 use bevy::prelude::*;
 use nexrad_core::types::{ElevationScan, RadarVolume};
 use nexrad_render::{
-    AnimationFrame, AnimationFrameReceiver, ExternalVolumeReceiver, JsCommand, JsCommandReceiver,
+    AnimationFrame, AnimationFrameSlot, ExternalVolumeReceiver, JsCommand, JsCommandReceiver,
     RadarPlugin, StateNotifier, UiState,
 };
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use wasm_bindgen::prelude::*;
 
 /// Channel from JS into Bevy: volumes sent here are drained each frame by the plugin.
@@ -17,8 +17,8 @@ static PENDING_SCANS: OnceLock<RwLock<Vec<ElevationScan>>> = OnceLock::new();
 /// Channel from JS into Bevy: commands sent here are drained each frame by drain_js_commands.
 static CMD_TX: OnceLock<Sender<JsCommand>> = OnceLock::new();
 
-/// Channel from JS into Bevy: animation frames (texture-only updates for tilt 0).
-static ANIM_TX: OnceLock<Sender<AnimationFrame>> = OnceLock::new();
+/// Latest animation frame slot: JS overwrites, Bevy reads once per tick (no queue lag).
+static ANIM_SLOT: OnceLock<Arc<RwLock<Option<AnimationFrame>>>> = OnceLock::new();
 
 /// JS callback registered via set_state_callback(). Called from the StateNotifier on state change.
 static STATE_CB: OnceLock<js_sys::Function> = OnceLock::new();
@@ -30,17 +30,17 @@ pub fn run() {
 
     let (vol_tx, vol_rx) = async_channel::unbounded::<RadarVolume>();
     let (cmd_tx, cmd_rx) = async_channel::unbounded::<JsCommand>();
-    let (anim_tx, anim_rx) = async_channel::unbounded::<AnimationFrame>();
+    let anim_slot = Arc::new(RwLock::new(None::<AnimationFrame>));
 
     VOLUME_TX.set(vol_tx).ok();
     PENDING_SCANS.set(RwLock::new(Vec::new())).ok();
     CMD_TX.set(cmd_tx).ok();
-    ANIM_TX.set(anim_tx).ok();
+    ANIM_SLOT.set(anim_slot.clone()).ok();
 
     App::new()
         .insert_resource(ExternalVolumeReceiver(vol_rx))
         .insert_resource(JsCommandReceiver(cmd_rx))
-        .insert_resource(AnimationFrameReceiver(anim_rx))
+        .insert_resource(AnimationFrameSlot(anim_slot))
         .insert_resource(StateNotifier(Some(Box::new(|state: &UiState| {
             if let Some(cb) = STATE_CB.get() {
                 if let Ok(json) = serde_json::to_string(state) {
@@ -147,13 +147,16 @@ pub fn commit_volume(site_id: &str) {
 
 /// Update the base elevation (tilt 0) texture in-place for animation.
 /// `data` is pre-quantized R8Unorm (0-255). Called from JS on each animation frame.
+/// Overwrites the shared slot so Bevy always sees the latest frame (no queue lag).
 #[wasm_bindgen]
 pub fn update_base_texture(num_rays: u32, num_gates: u32, data: &[u8]) {
-    if let Some(tx) = ANIM_TX.get() {
-        let _ = tx.try_send(AnimationFrame {
-            num_rays: num_rays as usize,
-            num_gates: num_gates as usize,
-            data: data.to_vec(),
-        });
+    if let Some(slot) = ANIM_SLOT.get() {
+        if let Ok(mut g) = slot.write() {
+            *g = Some(AnimationFrame {
+                num_rays: num_rays as usize,
+                num_gates: num_gates as usize,
+                data: data.to_vec(),
+            });
+        }
     }
 }

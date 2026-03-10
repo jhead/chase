@@ -27,10 +27,7 @@ export function NexradHUD() {
         onCycleSpeed={anim.cycleSpeed}
       />
 
-      {/* Scrub bar below top bar */}
-      <ScrubBar state={anim.state} onSeek={anim.seekTo} />
-
-      {/* Below top bar + scrub: sidebar + canvas area */}
+      {/* Below top bar: sidebar + canvas area */}
       <Body>
         <Sidebar
           animationState={anim.state}
@@ -41,6 +38,10 @@ export function NexradHUD() {
         <CanvasArea>
           {/* Blender-style corner buttons */}
           <CanvasButtons />
+          {/* Scrub bar overlaid above scale */}
+          <ScrubBarWrap>
+            <ScrubBar state={anim.state} onSeek={anim.seekTo} />
+          </ScrubBarWrap>
           {/* Color legend pinned to canvas bottom */}
           <ReflectivityLegend />
         </CanvasArea>
@@ -69,4 +70,13 @@ const Body = styled.div`
 const CanvasArea = styled.div`
   flex: 1;
   position: relative;
+`;
+
+/** Positions scrub bar above ReflectivityLegend (32px). Enables pointer-events for interaction. */
+const ScrubBarWrap = styled.div`
+  position: absolute;
+  bottom: 32px;
+  left: 0;
+  right: 0;
+  pointer-events: all;
 `;

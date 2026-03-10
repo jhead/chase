@@ -1,6 +1,7 @@
 use bevy::{asset::embedded_asset, light::GlobalAmbientLight, prelude::*};
 use nexrad_core::{isosurface::IsoMeshData, sites::RadarSite, types::{ElevationScan, RadarVolume}};
 use serde::Serialize;
+use std::sync::{Arc, RwLock};
 
 use crate::{
     basemap::BasemapPlugin,
@@ -189,9 +190,10 @@ pub struct AnimationFrame {
     pub data: Vec<u8>,
 }
 
-/// Receives animation frames from JS via the ANIM_TX channel.
+/// Latest animation frame slot from JS. Replaces channel so rapid scrubbing
+/// overwrites with the current frame instead of queuing; Bevy reads once per tick.
 #[derive(Resource)]
-pub struct AnimationFrameReceiver(pub async_channel::Receiver<AnimationFrame>);
+pub struct AnimationFrameSlot(pub Arc<RwLock<Option<AnimationFrame>>>);
 
 /// Tracks current base texture dimensions to detect when geometry changes.
 #[derive(Resource, Default)]
@@ -293,7 +295,7 @@ impl Plugin for RadarPlugin {
             app.add_systems(Update, drain_js_commands.before(toggle_render_mode));
         }
 
-        if app.world().get_resource::<AnimationFrameReceiver>().is_some() {
+        if app.world().get_resource::<AnimationFrameSlot>().is_some() {
             app.init_resource::<BaseTextureDims>()
                 .add_systems(Update, receive_animation_frame);
         }
@@ -655,13 +657,20 @@ fn drain_js_commands(
 }
 
 fn receive_animation_frame(
-    receiver: Res<AnimationFrameReceiver>,
+    slot: Res<AnimationFrameSlot>,
     base_query: Query<&MeshMaterial3d<RadarMaterial>, With<BaseElevationMarker>>,
     mut radar_materials: ResMut<Assets<RadarMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut dims: ResMut<BaseTextureDims>,
 ) {
-    let Ok(frame) = receiver.0.try_recv() else {
+    let frame = {
+        let mut g = match slot.0.write() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        g.take()
+    };
+    let Some(frame) = frame else {
         return;
     };
 
