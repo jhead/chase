@@ -4,47 +4,49 @@
 @group(3) @binding(0) var reflectivity_texture: texture_2d<f32>;
 @group(3) @binding(1) var reflectivity_sampler: sampler;
 
-// Official NWS Standard Reflectivity Color Table.
-// Input: normalized reflectivity in [0, 1] (where 1.0 = 75 dBZ).
+// Reflectivity color table approximating the shared NWS LUT.
+// Input: dBZ in physical units (0–75 dBZ in practice; colors follow the 0–95 LUT).
 fn nws_colormap(dbz: f32) -> vec3<f32> {
     if dbz < 5.0 {
-        return vec3<f32>(0.188, 0.204, 0.227);
+        return vec3<f32>(0.318, 0.447, 0.537); // ~#517289 (19 dBZ blue, low end)
     } else if dbz < 10.0 {
-        return vec3<f32>(0.188, 0.235, 0.337);
+        return vec3<f32>(0.188, 0.212, 0.251); // #303640
     } else if dbz < 15.0 {
-        return vec3<f32>(0.302, 0.424, 0.518);
+        return vec3<f32>(0.220, 0.283, 0.388); // #384863
     } else if dbz < 20.0 {
-        return vec3<f32>(0.369, 0.671, 0.451);
+        return vec3<f32>(0.318, 0.447, 0.537); // #597f96
     } else if dbz < 25.0 {
-        return vec3<f32>(0.227, 0.482, 0.180);
+        return vec3<f32>(0.314, 0.671, 0.451); // ~#5eab73
     } else if dbz < 30.0 {
-        return vec3<f32>(0.635, 0.745, 0.231);
+        return vec3<f32>(0.196, 0.631, 0.294); // ~#50a14b
     } else if dbz < 35.0 {
-        return vec3<f32>(0.898, 0.875, 0.286);
+        return vec3<f32>(0.412, 0.627, 0.110); // ~#2c621c / #4e8025 blend
     } else if dbz < 40.0 {
-        return vec3<f32>(0.925, 0.600, 0.216);
+        return vec3<f32>(0.988, 0.992, 0.329); // #fcfd54
     } else if dbz < 45.0 {
-        return vec3<f32>(0.780, 0.475, 0.173);
+        return vec3<f32>(0.820, 0.776, 0.231); // ~#d1c640
     } else if dbz < 50.0 {
-        return vec3<f32>(0.898, 0.243, 0.153);
+        return vec3<f32>(0.855, 0.584, 0.208); // ~#e89535
     } else if dbz < 55.0 {
-        return vec3<f32>(0.690, 0.208, 0.137);
+        return vec3<f32>(0.694, 0.404, 0.145); // ~#b16727
     } else if dbz < 60.0 {
-        return vec3<f32>(0.471, 0.184, 0.145);
+        return vec3<f32>(0.776, 0.216, 0.153); // #c23724
     } else if dbz < 65.0 {
-        return vec3<f32>(0.725, 0.388, 0.573);
+        return vec3<f32>(0.533, 0.188, 0.137); // ~#883023
     } else if dbz < 70.0 {
-        return vec3<f32>(0.698, 0.188, 0.439);
+        return vec3<f32>(0.733, 0.435, 0.600); // #bb6f99
     } else if dbz < 75.0 {
-        return vec3<f32>(0.396, 0.129, 0.694);
+        return vec3<f32>(0.698, 0.220, 0.463); // #b23876
     } else if dbz < 80.0 {
-        return vec3<f32>(0.224, 0.071, 0.525);
+        return vec3<f32>(0.416, 0.133, 0.710); // #6a22b5
     } else if dbz < 85.0 {
-        return vec3<f32>(0.482, 0.733, 0.780);
+        return vec3<f32>(0.235, 0.078, 0.541); // #3c148a
     } else if dbz < 90.0 {
-        return vec3<f32>(0.314, 0.459, 0.549);
+        return vec3<f32>(0.502, 0.761, 0.804); // #80c2cd
+    } else if dbz < 95.0 {
+        return vec3<f32>(0.314, 0.459, 0.549); // #50758c
     } else {
-        return vec3<f32>(0.412, 0.090, 0.043);
+        return vec3<f32>(0.412, 0.090, 0.043); // #69170b
     }
 }
 

@@ -2,6 +2,7 @@ pub mod beam_height;
 pub mod geo;
 pub mod sites;
 pub mod isosurface;
+pub mod colormap;
 pub mod types;
 
 #[cfg(feature = "parse")]

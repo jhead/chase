@@ -1,7 +1,7 @@
 use lin_alg::f32::Vec3 as LinVec3;
 use mcubes::{MarchingCubes, MeshSide};
 
-use crate::{beam_height::polar_to_world, types::ElevationScan};
+use crate::{beam_height::polar_to_world, colormap::color_for_dbz, types::ElevationScan};
 
 /// Single isosurface threshold. One opaque mesh avoids z-fighting that nested
 /// transparent shells produce. Vertex colors (sampled inward from the surface)
@@ -20,49 +20,11 @@ pub struct IsoMeshData {
     pub indices: Vec<u32>,
 }
 
-/// Official NWS reflectivity colormap. Input: normalized [0, 1] (1.0 = 75 dBZ).
+/// Official NWS reflectivity colormap using the shared JSON LUT.
+/// Input: normalized [0, 1] (1.0 = 75 dBZ).
 pub fn nws_colormap(v: f32, alpha: f32) -> [f32; 4] {
     let dbz = v * 75.0;
-    let rgb = if dbz < 5.0 {
-        [0.188, 0.204, 0.227] // #30343a
-    } else if dbz < 10.0 {
-        [0.188, 0.235, 0.337] // #303c56
-    } else if dbz < 15.0 {
-        [0.302, 0.424, 0.518] // #4d6c84
-    } else if dbz < 20.0 {
-        [0.369, 0.671, 0.451] // #5eab73
-    } else if dbz < 25.0 {
-        [0.227, 0.482, 0.180] // #3a7b2e
-    } else if dbz < 30.0 {
-        [0.635, 0.745, 0.231] // #a2be3b
-    } else if dbz < 35.0 {
-        [0.898, 0.875, 0.286] // #e5df49
-    } else if dbz < 40.0 {
-        [0.925, 0.600, 0.216] // #ec9937
-    } else if dbz < 45.0 {
-        [0.780, 0.475, 0.173] // #c7792c
-    } else if dbz < 50.0 {
-        [0.898, 0.243, 0.153] // #e53e27
-    } else if dbz < 55.0 {
-        [0.690, 0.208, 0.137] // #b03523
-    } else if dbz < 60.0 {
-        [0.471, 0.184, 0.145] // #782f25
-    } else if dbz < 65.0 {
-        [0.725, 0.388, 0.573] // #b96392
-    } else if dbz < 70.0 {
-        [0.698, 0.188, 0.439] // #b23070
-    } else if dbz < 75.0 {
-        [0.396, 0.129, 0.694] // #6521b1
-    } else if dbz < 80.0 {
-        [0.224, 0.071, 0.525] // #391286
-    } else if dbz < 85.0 {
-        [0.482, 0.733, 0.780] // #7bbbc7
-    } else if dbz < 90.0 {
-        [0.314, 0.459, 0.549] // #50758c
-    } else {
-        [0.412, 0.090, 0.043] // #69170b
-    };
-    [rgb[0], rgb[1], rgb[2], alpha]
+    color_for_dbz(dbz, alpha)
 }
 
 /// Separable 3D max-pool dilation with independent radii per axis.
