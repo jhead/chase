@@ -1,16 +1,30 @@
 use async_channel::Sender;
 use bevy::prelude::*;
 use nexrad_core::types::{ElevationScan, RadarVolume};
-use nexrad_render::{
-    AlertClickCallback, AlertCommand, AlertCommandReceiver, AlertCommandSender,
-    AnimationFrame, AnimationFrameSlots, AlertsPlugin, ExternalVolumeReceiver, JsCommand,
-    JsCommandReceiver, RadarPlugin, SiteClickNotifier, StateNotifier, TaggedVolume, UiState,
-};
 use std::{
     collections::HashMap,
     sync::{OnceLock, RwLock},
 };
 use wasm_bindgen::prelude::*;
+
+// Engine
+use nexrad_render::{
+    EngineCommand, EngineCommandReceiver, EnginePlugin,
+    SiteClickNotifier,
+};
+
+// Plugins
+use layer_basemap::BasemapPlugin;
+use layer_radar_l2::{
+    AnimationFrame, AnimationFrameSlots, ExternalVolumeReceiver,
+    RadarL2Plugin, TaggedVolume,
+    commands::RadarL2Command, RadarL2CommandReceiver,
+    state::{StateNotifier, UiState},
+};
+use layer_noaa_alerts::{AlertCommand, AlertCommandReceiver, NoaaAlertsPlugin, AlertClickCallback};
+use layer_radar_sites::RadarSitesPlugin;
+
+// ── Static channels ─────────────────────────────────────────────────────────
 
 /// Channel from JS into Bevy: tagged volumes sent here are drained each frame.
 static VOLUME_TX: OnceLock<Sender<TaggedVolume>> = OnceLock::new();
@@ -18,42 +32,61 @@ static VOLUME_TX: OnceLock<Sender<TaggedVolume>> = OnceLock::new();
 /// Per-layer scan accumulators: add_scan() appends here, commit_volume() drains and sends.
 static PENDING_SCANS: OnceLock<RwLock<HashMap<String, Vec<ElevationScan>>>> = OnceLock::new();
 
-/// Channel from JS into Bevy: commands sent here are drained each frame.
-static CMD_TX: OnceLock<Sender<JsCommand>> = OnceLock::new();
-
 /// Per-layer animation frame slots. Shared Arc between JS and Bevy.
-/// JS writes into a slot keyed by layer_id; Bevy drains each slot once per tick.
 static ANIM_SLOTS: OnceLock<AnimationFrameSlots> = OnceLock::new();
 
-/// JS callback registered via set_state_callback(). Called on state change.
+/// Engine command channel.
+static ENGINE_CMD_TX: OnceLock<Sender<EngineCommand>> = OnceLock::new();
+
+/// Radar L2 command channel.
+static RADAR_CMD_TX: OnceLock<Sender<RadarL2Command>> = OnceLock::new();
+
+/// Alert command channel.
+static ALERT_CMD_TX: OnceLock<Sender<AlertCommand>> = OnceLock::new();
+
+/// JS callback registered via set_state_callback().
 static STATE_CB: OnceLock<js_sys::Function> = OnceLock::new();
 
-/// JS callback registered via set_alert_click_callback(). Called when an alert polygon is clicked.
+/// JS callback registered via set_alert_click_callback().
 static ALERT_CLICK_CB: OnceLock<js_sys::Function> = OnceLock::new();
 
-/// JS callback registered via set_site_click_callback(). Called when a radar site marker is clicked.
+/// JS callback registered via set_site_click_callback().
 static SITE_CLICK_CB: OnceLock<js_sys::Function> = OnceLock::new();
+
+// ── App entry point ─────────────────────────────────────────────────────────
 
 #[wasm_bindgen(start)]
 pub fn run() {
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook::set_once();
 
+    // Volume channel (JS → radar-l2 plugin)
     let (vol_tx, vol_rx) = async_channel::unbounded::<TaggedVolume>();
-    let (cmd_tx, cmd_rx) = async_channel::unbounded::<JsCommand>();
-    let (alert_cmd_tx, alert_cmd_rx) = async_channel::unbounded::<AlertCommand>();
-    let anim_slots = AnimationFrameSlots::default();
-
     VOLUME_TX.set(vol_tx).ok();
     PENDING_SCANS.set(RwLock::new(HashMap::new())).ok();
-    CMD_TX.set(cmd_tx).ok();
+
+    // Animation frame slots
+    let anim_slots = AnimationFrameSlots::default();
     ANIM_SLOTS.set(anim_slots.clone()).ok();
 
+    // Engine command channel
+    let (engine_cmd_tx, engine_cmd_rx) = async_channel::unbounded::<EngineCommand>();
+    ENGINE_CMD_TX.set(engine_cmd_tx).ok();
+
+    // Radar L2 command channel
+    let (radar_cmd_tx, radar_cmd_rx) = async_channel::unbounded::<RadarL2Command>();
+    RADAR_CMD_TX.set(radar_cmd_tx).ok();
+
+    // Alert command channel
+    let (alert_cmd_tx, alert_cmd_rx) = async_channel::unbounded::<AlertCommand>();
+    ALERT_CMD_TX.set(alert_cmd_tx).ok();
+
     App::new()
+        // Engine resources
+        .insert_resource(EngineCommandReceiver(engine_cmd_rx))
+        // Radar L2 resources
         .insert_resource(ExternalVolumeReceiver(vol_rx))
-        .insert_resource(JsCommandReceiver(cmd_rx))
-        .insert_resource(AlertCommandSender(alert_cmd_tx))
-        .insert_resource(AlertCommandReceiver(alert_cmd_rx))
+        .insert_resource(RadarL2CommandReceiver(radar_cmd_rx))
         .insert_resource(anim_slots)
         .insert_resource(StateNotifier(Some(Box::new(|state: &UiState| {
             if let Some(cb) = STATE_CB.get() {
@@ -62,14 +95,15 @@ pub fn run() {
                 }
             }
         }))))
+        // Alert resources
+        .insert_resource(AlertCommandReceiver(alert_cmd_rx))
         .insert_resource(AlertClickCallback(Some(Box::new(|alert_id: &str| {
             if let Some(cb) = ALERT_CLICK_CB.get() {
                 let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(alert_id));
             }
         }))))
+        // Site click callback
         .insert_resource(SiteClickNotifier(Some(Box::new(|site_id: &str| {
-            // Defer to next microtask so the JS call happens after winit releases
-            // its rAF RefCell borrow, preventing "RefCell already borrowed" panics.
             let site_id = site_id.to_string();
             #[cfg(target_arch = "wasm32")]
             wasm_bindgen_futures::spawn_local(async move {
@@ -84,6 +118,7 @@ pub fn run() {
                 }
             }
         }))))
+        // Default Bevy plugins
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 canvas: Some("#nexrad-bevy-canvas".to_string()),
@@ -93,41 +128,68 @@ pub fn run() {
             }),
             ..default()
         }))
-        .add_plugins(RadarPlugin::default())
-        .add_plugins(AlertsPlugin)
+        // Engine + layer plugins
+        .add_plugins(EnginePlugin)
+        .add_plugins(BasemapPlugin)
+        .add_plugins(RadarL2Plugin::default())
+        .add_plugins(NoaaAlertsPlugin)
+        .add_plugins(RadarSitesPlugin)
         .run();
 }
 
-/// Register a JS callback to run when an alert polygon is clicked. Receives the alert ID string.
-#[wasm_bindgen]
-pub fn set_alert_click_callback(cb: js_sys::Function) {
-    ALERT_CLICK_CB.set(cb).ok();
-}
+// ── Callbacks ───────────────────────────────────────────────────────────────
 
-/// Register a JS callback to receive UiState updates from Bevy.
 #[wasm_bindgen]
 pub fn set_state_callback(cb: js_sys::Function) {
     STATE_CB.set(cb).ok();
 }
 
-/// Register a JS callback to be invoked when a radar site marker is clicked. The callback receives the site ID string (e.g. "KDMX").
+#[wasm_bindgen]
+pub fn set_alert_click_callback(cb: js_sys::Function) {
+    ALERT_CLICK_CB.set(cb).ok();
+}
+
 #[wasm_bindgen]
 pub fn set_site_click_callback(cb: js_sys::Function) {
     SITE_CLICK_CB.set(cb).ok();
 }
 
-/// Send a command to the Bevy renderer. `json` is a JSON-serialized JsCommand.
+// ── Command routing ─────────────────────────────────────────────────────────
+
+/// Send a command to the renderer. `json` is a JSON-serialized command.
+/// Commands are routed to the appropriate plugin based on the `type` field.
 #[wasm_bindgen]
 pub fn send_command(json: &str) {
-    if let Some(cmd) = JsCommand::from_json(json) {
-        if let Some(tx) = CMD_TX.get() {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return };
+
+    // Try engine commands first
+    if let Some(cmd) = EngineCommand::from_json(&v) {
+        if let Some(tx) = ENGINE_CMD_TX.get() {
             let _ = tx.try_send(cmd);
         }
+        return;
+    }
+
+    // Try radar-l2 commands
+    if let Some(cmd) = RadarL2Command::from_json(&v) {
+        if let Some(tx) = RADAR_CMD_TX.get() {
+            let _ = tx.try_send(cmd);
+        }
+        return;
+    }
+
+    // Try alert commands
+    if let Some(cmd) = AlertCommand::from_json(&v) {
+        if let Some(tx) = ALERT_CMD_TX.get() {
+            let _ = tx.try_send(cmd);
+        }
+        return;
     }
 }
 
+// ── Radar L2 data functions ─────────────────────────────────────────────────
+
 /// Append one elevation scan to the pending buffer for the given layer.
-/// Data is row-major: reflectivity[ray * num_gates + gate].
 #[wasm_bindgen]
 pub fn add_scan(
     layer_id: &str,
@@ -198,8 +260,6 @@ pub fn commit_volume(layer_id: &str, site_id: &str) {
 }
 
 /// Update the base elevation texture for a specific layer (for animation playback).
-/// `data` is pre-quantized R8Unorm (0-255). Overwrites the slot so Bevy always
-/// sees the latest frame without queue lag.
 #[wasm_bindgen]
 pub fn update_layer_texture(layer_id: &str, num_rays: u32, num_gates: u32, data: &[u8]) {
     if let Some(slots) = ANIM_SLOTS.get() {

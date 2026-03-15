@@ -1,15 +1,2 @@
-[workspace]
-members = [
-    "nexrad-core",
-    "nexrad-fetch",
-    "nexrad-render",
-    "nexrad-cli",
-    "nexrad-web",
-]
-resolver = "2"
-
-[profile.dev]
-opt-level = 1
-
-[profile.dev.package."*"]
-opt-level = 3
+# Workspace root has moved to the repo root (../Cargo.toml).
+# This file is kept only as a marker for the nexrad-3d directory.

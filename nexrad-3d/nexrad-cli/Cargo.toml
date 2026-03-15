@@ -11,6 +11,8 @@ path = "src/main.rs"
 nexrad-core = { path = "../nexrad-core" }
 nexrad-render = { path = "../nexrad-render" }
 nexrad-fetch = { path = "../nexrad-fetch" }
+layer-basemap = { path = "../../plugins/layer-basemap/crate" }
+layer-radar-l2 = { path = "../../plugins/layer-radar-l2/crate" }
 # dynamic_linking speeds up dev builds; features are additive so nexrad-render
 # also benefits when compiled as part of this crate.
 bevy = { version = "0.18.1", features = ["dynamic_linking"] }

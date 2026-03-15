@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import type { AlertsLayer } from "./useLayers";
+import type { AlertsLayer } from "./types";
 
 const IEM_SBW_URL = "https://mesonet.agron.iastate.edu/geojson/sbw.geojson";
 const POLL_MS = 30_000;
@@ -13,13 +13,9 @@ export interface AlertFeature {
   wfo: string;
   issued: string;
   expires: string;
-  /** Human-readable product name (e.g. "Flood Warning") */
   ps: string;
-  /** Full alert text if available; otherwise omitted */
   raw?: string;
-  /** First ring of polygon [lng, lat][] for display/Bevy */
   coordinates: [number, number][][];
-  /** RGBA 0–1 for Bevy */
   color: [number, number, number, number];
 }
 
@@ -50,7 +46,7 @@ interface IEMFeatureCollection {
   features: IEMFeature[];
 }
 
-// ── Color mapping (plan: TO+W red, TO+A orange, SV+W yellow, etc.) ─────────────
+// ── Color mapping ────────────────────────────────────────────────────────────
 
 function colorForPhenomenaSignificance(
   phenomena: string,
@@ -133,7 +129,7 @@ async function fetchSBW(): Promise<AlertFeature[]> {
   return out;
 }
 
-// ── Filter by layer config ─────────────────────────────────────────────────────
+// ── Filter by layer config ───────────────────────────────────────────────────
 
 function filterAlerts(
   features: AlertFeature[],

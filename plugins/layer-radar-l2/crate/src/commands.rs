@@ -1,0 +1,32 @@
+/// Commands specific to the radar L2 plugin, parsed from JSON.
+#[derive(Debug, Clone)]
+pub enum RadarL2Command {
+    /// Despawn all entities for a layer and remove its state.
+    RemoveLayer { layer_id: String },
+    /// Set how many elevation tilts are shown for a specific radar layer.
+    SetElevationCount { layer_id: String, count: u32 },
+    /// Set the minimum dBZ threshold for a specific radar layer.
+    SetThreshold { layer_id: String, dbz: f32 },
+}
+
+impl RadarL2Command {
+    pub fn from_json(v: &serde_json::Value) -> Option<Self> {
+        match v["type"].as_str()? {
+            "RemoveLayer" => {
+                let layer_id = v["layer_id"].as_str()?.to_string();
+                Some(RadarL2Command::RemoveLayer { layer_id })
+            }
+            "SetElevationCount" => {
+                let layer_id = v["layer_id"].as_str().unwrap_or("radar-1").to_string();
+                let count = v["count"].as_u64()? as u32;
+                Some(RadarL2Command::SetElevationCount { layer_id, count })
+            }
+            "SetThreshold" => {
+                let layer_id = v["layer_id"].as_str().unwrap_or("radar-1").to_string();
+                let dbz = v["dbz"].as_f64()? as f32;
+                Some(RadarL2Command::SetThreshold { layer_id, dbz })
+            }
+            _ => None,
+        }
+    }
+}

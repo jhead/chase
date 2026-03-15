@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "nexrad-3d/nexrad-core",
+    "nexrad-3d/nexrad-fetch",
+    "nexrad-3d/nexrad-render",
+    "nexrad-3d/nexrad-cli",
+    "nexrad-3d/nexrad-web",
+    "plugins/layer-basemap/crate",
+    "plugins/layer-radar-l2/crate",
+    "plugins/layer-noaa-alerts/crate",
+    "plugins/layer-radar-sites/crate",
+]
+resolver = "2"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
