@@ -36,7 +36,8 @@ export type JsCommand =
   | { type: "SetCameraMode"; mode: "2d" | "3d" }
   | { type: "SetAlerts"; layer_id: string; alerts: AlertPolygonPayload[] }
   | { type: "ClearAlerts"; layer_id: string }
-  | { type: "SetLayerVisible"; layer_id: string; visible: boolean };
+  | { type: "SetLayerVisible"; layer_id: string; visible: boolean }
+  | { type: "ZoomAtPoint"; x: number; y: number; delta: number };
 
 /** Per-layer state snapshot pushed from Bevy. */
 export interface UiRadarLayerState {

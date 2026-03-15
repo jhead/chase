@@ -4,6 +4,7 @@ import { useWasm } from "../../ctx/WasmContext";
 import { useLayers } from "../../hooks/useLayers";
 import { useMultiLayerAnimation } from "../../hooks/useMultiLayerAnimation";
 import { useAlertsData } from "../../hooks/useAlertsData";
+import { usePinchZoom } from "../../hooks/usePinchZoom";
 import type { AlertPolygonPayload } from "../../ctx/WasmContext";
 import type { RadarLayer } from "../../hooks/useLayers";
 import { TopBar } from "./TopBar";
@@ -13,6 +14,8 @@ import { ReflectivityLegend } from "./ReflectivityLegend";
 import { ScrubBar } from "./ScrubBar";
 
 export function NexradHUD() {
+  usePinchZoom();
+
   const [sidebarOpen, setSidebarOpen] = useState(true);
   void sidebarOpen;
 

@@ -20,10 +20,10 @@ const disableMap = !isNexrad && params.includes("nomap");
 /** Canvas element that Bevy attaches to. Always in the DOM for the lifetime of the page. */
 function PersistentCanvas() {
   const style: React.CSSProperties = isNexrad || isRadar
-    ? { position: "fixed", inset: 0, zIndex: 0, width: "100%", height: "100%" }
+    ? { position: "fixed", inset: 0, zIndex: 0, width: "100%", height: "100%", touchAction: "none" }
     : { position: "absolute", width: 0, height: 0, visibility: "hidden" };
 
-  return <canvas id="nexrad-bevy-canvas" style={style} />;
+  return <canvas id="nexrad-bevy-canvas" style={style} onContextMenu={(e) => e.preventDefault()} />;
 }
 
 function App() {

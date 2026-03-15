@@ -11,7 +11,7 @@ use bevy::picking::events::Click;
 
 use crate::{
     basemap::BasemapPlugin,
-    camera::orbit_camera::{CameraMode, OrbitCamera, OrbitCameraPlugin},
+    camera::orbit_camera::{CameraMode, CameraSystemSet, OrbitCamera, OrbitCameraPlugin, PendingZoomAtPoint},
     overlay::{radar_sites::RadarSitesPlugin, OverlayLayerId, SiteClickNotifier},
     rendering::{
         elevation_mesh::build_elevation_mesh,
@@ -91,6 +91,10 @@ pub enum JsCommand {
     ClearAlerts { layer_id: String },
     /// Show or hide overlay layer entities (e.g. radar-sites).
     SetLayerVisible { layer_id: String, visible: bool },
+    /// Zoom toward a specific viewport point (from JS pinch or pointer gestures).
+    /// `delta` > 0 = zoom in; same sign convention as scroll delta.
+    /// `x`, `y` are logical CSS pixels matching Bevy's cursor_position() space.
+    ZoomAtPoint { x: f32, y: f32, delta: f32 },
 }
 
 impl JsCommand {
@@ -137,6 +141,12 @@ impl JsCommand {
                 let layer_id = v["layer_id"].as_str()?.to_string();
                 let visible = v["visible"].as_bool().unwrap_or(true);
                 Some(JsCommand::SetLayerVisible { layer_id, visible })
+            }
+            "ZoomAtPoint" => {
+                let x = v["x"].as_f64()? as f32;
+                let y = v["y"].as_f64()? as f32;
+                let delta = v["delta"].as_f64()? as f32;
+                Some(JsCommand::ZoomAtPoint { x, y, delta })
             }
             _ => None,
         }
@@ -319,7 +329,7 @@ impl Plugin for RadarPlugin {
         }
 
         if app.world().get_resource::<JsCommandReceiver>().is_some() {
-            app.add_systems(Update, drain_js_commands);
+            app.add_systems(Update, drain_js_commands.before(CameraSystemSet::OrbitCamera));
         }
 
         if app.world().get_resource::<AnimationFrameSlots>().is_some() {
@@ -516,6 +526,7 @@ fn drain_js_commands(
     elev_material_handles: Query<(&MeshMaterial3d<RadarMaterial>, &LayerId), With<RadarElevation>>,
     mut radar_materials: ResMut<Assets<RadarMaterial>>,
     mut camera_mode: ResMut<CameraMode>,
+    mut pending_zoom: ResMut<PendingZoomAtPoint>,
 ) {
     while let Ok(cmd) = receiver.0.try_recv() {
         match cmd {
@@ -596,6 +607,10 @@ fn drain_js_commands(
                         *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
                     }
                 }
+            }
+            JsCommand::ZoomAtPoint { x, y, delta } => {
+                // Overwrite: only the latest pinch command per frame is applied
+                pending_zoom.0 = Some((delta, Vec2::new(x, y)));
             }
         }
     }
