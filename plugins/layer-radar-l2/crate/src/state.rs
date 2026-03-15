@@ -10,14 +10,29 @@ pub struct BaseTextureDims {
     pub num_gates: usize,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct RadarLayerState {
     pub elevation_count: u32,
     pub elevation_total: u32,
     pub threshold_dbz: f32,
+    pub range_km: f32,
     pub site_world_pos: Vec3,
     pub base_dims: BaseTextureDims,
     pub site_id: Option<String>,
+}
+
+impl Default for RadarLayerState {
+    fn default() -> Self {
+        Self {
+            elevation_count: 0,
+            elevation_total: 0,
+            threshold_dbz: 0.0,
+            range_km: 460.0,
+            site_world_pos: Vec3::ZERO,
+            base_dims: BaseTextureDims::default(),
+            site_id: None,
+        }
+    }
 }
 
 impl RadarLayerState {
@@ -38,6 +53,7 @@ pub struct UiRadarLayerState {
     pub elevation_count: u32,
     pub elevation_total: u32,
     pub threshold_dbz: f32,
+    pub range_km: f32,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -58,6 +74,7 @@ impl UiState {
             elevation_count: s.elevation_count,
             elevation_total: s.elevation_total,
             threshold_dbz: s.threshold_dbz,
+            range_km: s.range_km,
         }).collect();
         self.radar_layers.sort_by(|a, b| a.layer_id.cmp(&b.layer_id));
 

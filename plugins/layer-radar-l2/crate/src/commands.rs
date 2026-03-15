@@ -7,6 +7,8 @@ pub enum RadarL2Command {
     SetElevationCount { layer_id: String, count: u32 },
     /// Set the minimum dBZ threshold for a specific radar layer.
     SetThreshold { layer_id: String, dbz: f32 },
+    /// Set the render range cap in km for a specific radar layer.
+    SetRangeKm { layer_id: String, range_km: f32 },
 }
 
 impl RadarL2Command {
@@ -25,6 +27,11 @@ impl RadarL2Command {
                 let layer_id = v["layer_id"].as_str().unwrap_or("radar-1").to_string();
                 let dbz = v["dbz"].as_f64()? as f32;
                 Some(RadarL2Command::SetThreshold { layer_id, dbz })
+            }
+            "SetRangeKm" => {
+                let layer_id = v["layer_id"].as_str().unwrap_or("radar-1").to_string();
+                let range_km = v["range_km"].as_f64()? as f32;
+                Some(RadarL2Command::SetRangeKm { layer_id, range_km })
             }
             _ => None,
         }

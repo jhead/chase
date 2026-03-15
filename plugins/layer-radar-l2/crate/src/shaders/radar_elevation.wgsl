@@ -3,6 +3,9 @@
 @group(3) @binding(0) var reflectivity_texture: texture_2d<f32>;
 @group(3) @binding(1) var reflectivity_sampler: sampler;
 /// params.x = threshold_dbz (pixels below this are discarded)
+/// params.y = range_km (cap radius; 0 = no cap)
+/// params.z = site_world_x
+/// params.w = site_world_z
 @group(3) @binding(2) var<uniform> params: vec4<f32>;
 
 fn nws_colormap(dbz: f32) -> vec3<f32> {
@@ -57,5 +60,21 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     let color = nws_colormap(dbz);
-    return vec4<f32>(color, 1.0);
+
+    var alpha = 1.0;
+    let range_km = params.y;
+    if range_km > 0.0 {
+        let dx = in.world_position.x - params.z;
+        let dz = in.world_position.z - params.w;
+        let dist_km = length(vec2<f32>(dx, dz)) / 1000.0;
+        if dist_km >= range_km {
+            discard;
+        }
+        let fade_start = range_km * 0.75;
+        if dist_km > fade_start {
+            alpha = 1.0 - (dist_km - fade_start) / (range_km - fade_start);
+        }
+    }
+
+    return vec4<f32>(color, alpha);
 }

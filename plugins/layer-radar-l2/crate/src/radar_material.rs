@@ -22,6 +22,6 @@ impl Material for RadarMaterial {
     }
 
     fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Opaque
+        AlphaMode::Blend
     }
 }

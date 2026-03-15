@@ -191,7 +191,7 @@ fn spawn_elevation_entities(
         let texture = create_reflectivity_texture(images, scan);
         let material = materials.add(RadarMaterial {
             reflectivity_texture: texture,
-            params: Vec4::new(layer_state.threshold_dbz, 0.0, 0.0, 0.0),
+            params: Vec4::new(layer_state.threshold_dbz, layer_state.range_km, site_offset.x, site_offset.z),
         });
         let visible = (i as u32) < layer_state.elevation_count;
         let mut entity = commands.spawn((
@@ -325,6 +325,20 @@ fn drain_radar_commands(
                     if lid.0 == layer_id {
                         if let Some(mat) = radar_materials.get_mut(&handle.0) {
                             mat.params.x = dbz;
+                        }
+                    }
+                }
+                ui_state.0.sync_layers(&layer_states);
+                notifier.notify(&ui_state.0);
+            }
+            RadarL2Command::SetRangeKm { layer_id, range_km } => {
+                if let Some(s) = layer_states.0.get_mut(&layer_id) {
+                    s.range_km = range_km;
+                }
+                for (handle, lid) in &elev_material_handles {
+                    if lid.0 == layer_id {
+                        if let Some(mat) = radar_materials.get_mut(&handle.0) {
+                            mat.params.y = range_km;
                         }
                     }
                 }
