@@ -59,7 +59,7 @@ impl Plugin for BasemapPlugin {
 
         app.add_plugins(MaterialPlugin::<BasemapLineMaterial>::default())
             .init_resource::<BasemapConfig>()
-            .insert_resource(ClearColor(Color::linear_rgb(0.05, 0.05, 0.07)))
+            .insert_resource(ClearColor(Color::BLACK))
             .add_systems(Startup, spawn_basemap)
             .add_systems(Update, rebuild_on_config_change);
     }
