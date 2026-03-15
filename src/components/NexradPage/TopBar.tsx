@@ -1,4 +1,12 @@
 import styled from "@emotion/styled";
+import {
+  ChevronsLeft,
+  ChevronLeft,
+  Play,
+  Pause,
+  ChevronRight,
+  ChevronsRight,
+} from "lucide-react";
 import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
 import type { AnimationState } from "../../hooks/useMultiLayerAnimation";
@@ -48,19 +56,23 @@ export function TopBar({
 
       <Center>
         <AnimBtn title="First frame" disabled={!enabled} onClick={onSeekFirst}>
-          {"⏮"}
+          <ChevronsLeft size={13} strokeWidth={1.5} />
         </AnimBtn>
         <AnimBtn title="Previous frame" disabled={!enabled} onClick={onPrevFrame}>
-          {"⏪"}
+          <ChevronLeft size={13} strokeWidth={1.5} />
         </AnimBtn>
         <AnimBtn title="Play / Pause" disabled={!enabled} onClick={onTogglePlay}>
-          {playing ? "⏸" : "▶"}
+          {playing ? (
+            <Pause size={13} strokeWidth={1.5} />
+          ) : (
+            <Play size={13} strokeWidth={1.5} />
+          )}
         </AnimBtn>
         <AnimBtn title="Next frame" disabled={!enabled} onClick={onNextFrame}>
-          {"⏩"}
+          <ChevronRight size={13} strokeWidth={1.5} />
         </AnimBtn>
         <AnimBtn title="Last frame" disabled={!enabled} onClick={onSeekLast}>
-          {"⏭"}
+          <ChevronsRight size={13} strokeWidth={1.5} />
         </AnimBtn>
         <SpeedLabel
           onClick={enabled ? onCycleSpeed : undefined}
@@ -76,7 +88,7 @@ export function TopBar({
       </Center>
 
       <Right>
-        <StatusDot style={{ color: loadingColor }}>●</StatusDot>
+        <StatusDot style={{ background: loadingColor }} />
         <StatusText>{loadingText}</StatusText>
       </Right>
     </Bar>
@@ -144,9 +156,11 @@ const AnimBtn = styled.button`
   background: none;
   border: none;
   color: ${theme.textSecondary};
-  font-size: 11px;
   padding: 4px 5px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: color 0.15s, opacity 0.15s;
 
   &:hover:not(:disabled) {
@@ -178,7 +192,11 @@ const FrameLabel = styled.span`
 `;
 
 const StatusDot = styled.span`
-  font-size: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
 `;
 
 const StatusText = styled.span`

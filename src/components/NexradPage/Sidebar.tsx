@@ -1,5 +1,6 @@
 import { useState } from "react";
 import styled from "@emotion/styled";
+import { ChevronRight, ChevronLeft, Layers } from "lucide-react";
 import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
 import type { AnimationState } from "../../hooks/useMultiLayerAnimation";
@@ -36,8 +37,12 @@ export function Sidebar({
   if (!expanded) {
     return (
       <Collapsed>
-        <CollapseBtn title="Expand sidebar" onClick={() => setExpanded(true)}>›</CollapseBtn>
-        <IconStub title="Layers">🗂</IconStub>
+        <CollapseBtn title="Expand sidebar" onClick={() => setExpanded(true)}>
+          <ChevronRight size={14} strokeWidth={1.5} />
+        </CollapseBtn>
+        <IconStub title="Layers">
+          <Layers size={14} strokeWidth={1.5} />
+        </IconStub>
       </Collapsed>
     );
   }
@@ -46,7 +51,9 @@ export function Sidebar({
     <Panel>
       <CollapseRow>
         <SectionLabel>Controls</SectionLabel>
-        <CollapseBtn title="Collapse sidebar" onClick={() => setExpanded(false)}>‹</CollapseBtn>
+        <CollapseBtn title="Collapse sidebar" onClick={() => setExpanded(false)}>
+          <ChevronLeft size={14} strokeWidth={1.5} />
+        </CollapseBtn>
       </CollapseRow>
 
       {/* Layers */}
@@ -172,20 +179,24 @@ const CollapseBtn = styled.button`
   background: none;
   border: none;
   color: ${theme.textSecondary};
-  font-size: 16px;
   cursor: pointer;
   padding: 2px 4px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   &:hover { color: ${theme.textPrimary}; }
 `;
 
 const IconStub = styled.button`
   background: none;
   border: none;
-  font-size: 14px;
+  color: ${theme.textDim};
   cursor: pointer;
   opacity: 0.5;
   padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   &:hover { opacity: 0.9; }
 `;
 

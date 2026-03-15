@@ -1,5 +1,6 @@
 import { useState } from "react";
 import styled from "@emotion/styled";
+import { ChevronRight, X } from "lucide-react";
 import { theme } from "./theme";
 
 interface LayerCardProps {
@@ -41,7 +42,9 @@ export function LayerCard({
               : "Enable layer"
           }
           style={{ cursor: disabled ? "default" : "pointer" }}
-        />
+        >
+          <ToggleDot active={enabled && !disabled} />
+        </ToggleBtn>
         <Label active={enabled && !disabled}>{label}</Label>
         {hasConfig && !disabled && (
           <ChevronBtn
@@ -49,12 +52,12 @@ export function LayerCard({
             onClick={() => setExpanded((v) => !v)}
             title={expanded ? "Collapse" : "Expand"}
           >
-            ›
+            <ChevronRight size={12} strokeWidth={1.5} />
           </ChevronBtn>
         )}
         {onRemove && !disabled && (
           <RemoveBtn onClick={onRemove} title="Remove layer">
-            ×
+            <X size={11} strokeWidth={1.5} />
           </RemoveBtn>
         )}
       </Header>
@@ -81,16 +84,26 @@ const ToggleBtn = styled.button<{ active?: boolean }>`
   border: none;
   cursor: pointer;
   padding: 0;
-  line-height: 1;
-  font-size: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
   color: ${({ active }) => (active ? theme.accent : theme.textDim)};
   flex-shrink: 0;
-  &::before {
-    content: "${({ active }) => (active ? "●" : "○")}";
-  }
   &:hover {
     color: ${({ active }) => (active ? theme.accentHover : theme.textSecondary)};
   }
+`;
+
+const ToggleDot = styled.span<{ active?: boolean }>`
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: ${({ active }) => (active ? "currentColor" : "transparent")};
+  border: 1px solid currentColor;
+  flex-shrink: 0;
 `;
 
 const Label = styled.span<{ active?: boolean }>`
@@ -105,8 +118,9 @@ const ChevronBtn = styled.button<{ expanded?: boolean }>`
   border: none;
   cursor: pointer;
   padding: 0 2px;
-  line-height: 1;
-  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: ${theme.textDim};
   transform: rotate(${({ expanded }) => (expanded ? "90deg" : "0deg")});
   transition: transform 0.15s ease;
@@ -121,8 +135,9 @@ const RemoveBtn = styled.button`
   border: none;
   cursor: pointer;
   padding: 0 2px;
-  line-height: 1;
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: ${theme.textDim};
   flex-shrink: 0;
   &:hover {
