@@ -17,6 +17,10 @@ export interface AlertsLayer {
   id: string;
   kind: "nws-alerts";
   enabled: boolean;
+  /** NWS phenomena codes to show (e.g. "TO", "SV", "WS"). Empty = show all. */
+  phenomena: string[];
+  /** NWS significance codes: W=warning, A=watch, Y=advisory, S=statement. Empty = show all. */
+  significance: string[];
 }
 
 export type Layer = RadarLayer | AlertsLayer;
@@ -29,8 +33,8 @@ function uid(kind: LayerKind) {
 }
 
 const DEFAULT_LAYERS: Layer[] = [
-  { id: "radar-1", kind: "radar",      enabled: true,  siteId: null, product: "REF" },
-  { id: "alerts-1", kind: "nws-alerts", enabled: false },
+  { id: "radar-1", kind: "radar", enabled: true, siteId: null, product: "REF" },
+  { id: "alerts-1", kind: "nws-alerts", enabled: false, phenomena: [], significance: ["W", "A"] },
 ];
 
 export interface UseLayers {
@@ -48,7 +52,7 @@ export function useLayers(): UseLayers {
     const base = { id, enabled: true };
     const layer: Layer = kind === "radar"
       ? { ...base, kind: "radar", siteId: null, product: "REF" }
-      : { ...base, kind: "nws-alerts" };
+      : { ...base, kind: "nws-alerts", phenomena: [], significance: ["W", "A"] };
     setLayers((prev) => [...prev, layer]);
   }, []);
 

@@ -20,6 +20,11 @@ export function run(): void;
 export function send_command(json: string): void;
 
 /**
+ * Register a JS callback to run when an alert polygon is clicked. Receives the alert ID string.
+ */
+export function set_alert_click_callback(cb: Function): void;
+
+/**
  * Register a JS callback to receive UiState updates from Bevy.
  */
 export function set_state_callback(cb: Function): void;

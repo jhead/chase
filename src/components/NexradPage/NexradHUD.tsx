@@ -1,5 +1,5 @@
 import styled from "@emotion/styled";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { TopBar } from "./TopBar";
 import { Sidebar } from "./Sidebar";
 import { CanvasButtons } from "./CanvasButtons";
@@ -7,6 +7,9 @@ import { ReflectivityLegend } from "./ReflectivityLegend";
 import { ScrubBar } from "./ScrubBar";
 import { useLayers } from "../../hooks/useLayers";
 import { useMultiLayerAnimation } from "../../hooks/useMultiLayerAnimation";
+import { useAlertsData } from "../../hooks/useAlertsData";
+import { useWasm } from "../../ctx/WasmContext";
+import type { AlertPolygonPayload } from "../../ctx/WasmContext";
 import type { RadarLayer } from "../../hooks/useLayers";
 
 export function NexradHUD() {
@@ -15,8 +18,33 @@ export function NexradHUD() {
 
   const { layers, addLayer, removeLayer, updateLayer } = useLayers();
   const radarLayers = layers.filter((l): l is RadarLayer => l.kind === "radar");
+  const alertsLayer = layers.find((l) => l.kind === "nws-alerts") ?? null;
 
   const anim = useMultiLayerAnimation(radarLayers);
+  const { alertsData, alertCount, lastUpdated } = useAlertsData(
+    alertsLayer?.kind === "nws-alerts" ? alertsLayer : undefined
+  );
+  const { activeAlertId, dismissAlert, sendCommand, isReady } = useWasm();
+
+  const activeAlert = alertsData.find((a) => a.id === activeAlertId) ?? null;
+
+  // Sync alerts to Bevy when data or layer config changes
+  useEffect(() => {
+    if (!isReady || !alertsLayer || alertsLayer.kind !== "nws-alerts") return;
+    if (!alertsLayer.enabled) {
+      sendCommand({ type: "ClearAlerts", layer_id: alertsLayer.id });
+      return;
+    }
+    const payloads: AlertPolygonPayload[] = alertsData.map((a) => ({
+      id: a.id,
+      coordinates: a.coordinates[0] ?? [],
+      color: a.color,
+    }));
+    if (payloads.length > 0) {
+      console.info("[NexradHUD] Sending SetAlerts to Bevy:", payloads.length, "polygons");
+    }
+    sendCommand({ type: "SetAlerts", layer_id: alertsLayer.id, alerts: payloads });
+  }, [alertsData, alertsLayer?.enabled, alertsLayer?.id, alertsLayer?.phenomena.join(","), alertsLayer?.significance.join(","), isReady, sendCommand]);
 
   return (
     <Root>
@@ -41,6 +69,10 @@ export function NexradHUD() {
           addLayer={addLayer}
           removeLayer={removeLayer}
           updateLayer={updateLayer}
+          activeAlert={activeAlert}
+          onDismissAlert={dismissAlert}
+          alertCount={alertCount}
+          lastUpdated={lastUpdated}
         />
         <CanvasArea>
           <CanvasButtons />

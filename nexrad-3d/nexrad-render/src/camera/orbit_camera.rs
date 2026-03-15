@@ -74,6 +74,7 @@ pub fn spawn_camera(mut commands: Commands) {
             far: 5_000_000.0,
             ..default()
         }),
+        MeshPickingCamera::default(),
         cam,
         transform,
     ));
