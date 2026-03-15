@@ -7,6 +7,7 @@ export const add_scan: (a: number, b: number, c: number, d: number, e: number, f
 export const commit_volume: (a: number, b: number, c: number, d: number) => void;
 export const update_layer_texture: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
 export const set_state_callback: (a: any) => void;
+export const set_site_click_callback: (a: any) => void;
 export const wasm_bindgen__closure__destroy__h24c0febaa5b40e0a: (a: number, b: number) => void;
 export const wasm_bindgen__closure__destroy__h3db7abc61f8e5d62: (a: number, b: number) => void;
 export const wasm_bindgen__closure__destroy__h46c90cb28d789240: (a: number, b: number) => void;

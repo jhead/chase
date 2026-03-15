@@ -14,6 +14,7 @@ export interface NexradWasm {
   commit_volume: (layer_id: string, site_id: string) => void;
   send_command: (json: string) => void;
   set_state_callback: (cb: (stateJson: string) => void) => void;
+  set_site_click_callback: (cb: (siteId: string) => void) => void;
   update_layer_texture: (layer_id: string, num_rays: number, num_gates: number, data: Uint8Array) => void;
 }
 
@@ -23,7 +24,8 @@ export type JsCommand =
   | { type: "RemoveLayer"; layer_id: string }
   | { type: "SetElevationCount"; layer_id: string; count: number }
   | { type: "SetThreshold"; layer_id: string; dbz: number }
-  | { type: "SetCameraMode"; mode: "2d" | "3d" };
+  | { type: "SetCameraMode"; mode: "2d" | "3d" }
+  | { type: "SetLayerVisible"; layer_id: string; visible: boolean };
 
 /** Per-layer state snapshot pushed from Bevy. */
 export interface UiRadarLayerState {

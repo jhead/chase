@@ -1,9 +1,11 @@
 pub mod basemap;
 pub mod camera;
+pub mod overlay;
 pub mod plugin;
 pub mod rendering;
 
 pub use basemap::BasemapConfig;
+pub use overlay::{OverlayLayerId, SiteClickNotifier};
 pub use plugin::{
     AnimationFrame, AnimationFrameSlots, TaggedVolume,
     ExternalVolumeReceiver, JsCommand, JsCommandReceiver,

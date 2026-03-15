@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use nexrad_core::types::{ElevationScan, RadarVolume};
 use nexrad_render::{
     AnimationFrame, AnimationFrameSlots, ExternalVolumeReceiver, JsCommand, JsCommandReceiver,
-    RadarPlugin, StateNotifier, TaggedVolume, UiState,
+    RadarPlugin, SiteClickNotifier, StateNotifier, TaggedVolume, UiState,
 };
 use std::{
     collections::HashMap,
@@ -26,6 +26,9 @@ static ANIM_SLOTS: OnceLock<AnimationFrameSlots> = OnceLock::new();
 
 /// JS callback registered via set_state_callback(). Called on state change.
 static STATE_CB: OnceLock<js_sys::Function> = OnceLock::new();
+
+/// JS callback registered via set_site_click_callback(). Called when a radar site marker is clicked.
+static SITE_CLICK_CB: OnceLock<js_sys::Function> = OnceLock::new();
 
 #[wasm_bindgen(start)]
 pub fn run() {
@@ -52,6 +55,23 @@ pub fn run() {
                 }
             }
         }))))
+        .insert_resource(SiteClickNotifier(Some(Box::new(|site_id: &str| {
+            // Defer to next microtask so the JS call happens after winit releases
+            // its rAF RefCell borrow, preventing "RefCell already borrowed" panics.
+            let site_id = site_id.to_string();
+            #[cfg(target_arch = "wasm32")]
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(cb) = SITE_CLICK_CB.get() {
+                    let _ = cb.call1(&wasm_bindgen::JsValue::NULL, &wasm_bindgen::JsValue::from_str(&site_id));
+                }
+            });
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                if let Some(cb) = SITE_CLICK_CB.get() {
+                    let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&site_id));
+                }
+            }
+        }))))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 canvas: Some("#nexrad-bevy-canvas".to_string()),
@@ -69,6 +89,12 @@ pub fn run() {
 #[wasm_bindgen]
 pub fn set_state_callback(cb: js_sys::Function) {
     STATE_CB.set(cb).ok();
+}
+
+/// Register a JS callback to be invoked when a radar site marker is clicked. The callback receives the site ID string (e.g. "KDMX").
+#[wasm_bindgen]
+pub fn set_site_click_callback(cb: js_sys::Function) {
+    SITE_CLICK_CB.set(cb).ok();
 }
 
 /// Send a command to the Bevy renderer. `json` is a JSON-serialized JsCommand.

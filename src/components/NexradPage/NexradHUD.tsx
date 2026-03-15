@@ -1,22 +1,34 @@
 import styled from "@emotion/styled";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useWasm } from "../../ctx/WasmContext";
+import { useLayers } from "../../hooks/useLayers";
+import { useMultiLayerAnimation } from "../../hooks/useMultiLayerAnimation";
+import type { RadarLayer } from "../../hooks/useLayers";
 import { TopBar } from "./TopBar";
 import { Sidebar } from "./Sidebar";
 import { CanvasButtons } from "./CanvasButtons";
 import { ReflectivityLegend } from "./ReflectivityLegend";
 import { ScrubBar } from "./ScrubBar";
-import { useLayers } from "../../hooks/useLayers";
-import { useMultiLayerAnimation } from "../../hooks/useMultiLayerAnimation";
-import type { RadarLayer } from "../../hooks/useLayers";
 
 export function NexradHUD() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   void sidebarOpen;
 
-  const { layers, addLayer, removeLayer, updateLayer } = useLayers();
+  const { wasm } = useWasm();
+  const { layers, addLayer, addRadarLayer, removeLayer, updateLayer } = useLayers();
   const radarLayers = layers.filter((l): l is RadarLayer => l.kind === "radar");
 
   const anim = useMultiLayerAnimation(radarLayers);
+
+  useEffect(() => {
+    if (!wasm) return;
+    wasm.set_site_click_callback((siteId: string) => {
+      const alreadyActive = radarLayers.some((l) => l.siteId === siteId);
+      if (alreadyActive) return;
+      const newId = addRadarLayer(siteId);
+      anim.initLayer(newId, siteId);
+    });
+  }, [wasm, radarLayers, addRadarLayer, anim]);
 
   return (
     <Root>

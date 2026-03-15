@@ -3,7 +3,7 @@ import styled from "@emotion/styled";
 import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
 import type { AnimationState } from "../../hooks/useMultiLayerAnimation";
-import type { Layer, AlertsLayer, RadarLayer, Product } from "../../hooks/useLayers";
+import type { Layer, AlertsLayer, RadarLayer, SitesLayer, Product } from "../../hooks/useLayers";
 import { LayerCard } from "./LayerCard";
 import { RadarLayerCard } from "./RadarLayerCard";
 
@@ -13,7 +13,7 @@ interface SidebarProps {
   onToggleLoop: () => void;
   onSelectSite: (layerId: string, siteId: string) => void;
   layers: Layer[];
-  addLayer: (kind: "radar") => void;
+  addLayer: (kind: "radar" | "radar-sites") => void;
   removeLayer: (id: string) => void;
   updateLayer: <T extends Layer>(id: string, updates: Partial<T>) => void;
 }
@@ -52,6 +52,36 @@ export function Sidebar({
       {/* Layers */}
       <Section>
         <SectionLabel>Layers</SectionLabel>
+
+        {/* Radar sites (clickable icons on map) */}
+        {layers
+          .filter((l): l is SitesLayer => l.kind === "radar-sites")
+          .map((layer) => (
+            <LayerCard
+              key={layer.id}
+              label="Radar Sites"
+              enabled={layer.enabled}
+              onToggle={() => {
+                const visible = !layer.enabled;
+                sendCommand({ type: "SetLayerVisible", layer_id: layer.id, visible });
+                updateLayer(layer.id, { enabled: visible });
+              }}
+              onRemove={() => {
+                removeLayer(layer.id);
+                sendCommand({ type: "SetLayerVisible", layer_id: layer.id, visible: false });
+              }}
+            />
+          ))}
+        {!layers.some((l) => l.kind === "radar-sites") && (
+          <AddLayerBtn
+            onClick={() => {
+              addLayer("radar-sites");
+              sendCommand({ type: "SetLayerVisible", layer_id: "radar-sites", visible: true });
+            }}
+          >
+            + Radar Sites
+          </AddLayerBtn>
+        )}
 
         {radarLayers.map((layer) => {
           const layerUiState = uiState.radar_layers.find((s) => s.layer_id === layer.id) ?? null;
