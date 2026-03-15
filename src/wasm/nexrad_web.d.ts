@@ -17,7 +17,7 @@ export function run(): void;
 
 /**
  * Send a command to the Bevy renderer. `json` is a JSON-serialized JsCommand discriminated union.
- * Example: `{"type":"SetRenderMode","mode":"isosurface"}`
+ * Example: `{"type":"SetThreshold","dbz":20}`
  */
 export function send_command(json: string): void;
 

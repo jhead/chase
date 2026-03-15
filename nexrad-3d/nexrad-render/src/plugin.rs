@@ -1,5 +1,5 @@
 use bevy::{asset::embedded_asset, light::GlobalAmbientLight, prelude::*};
-use nexrad_core::{isosurface::IsoMeshData, sites::RadarSite, types::{ElevationScan, RadarVolume}};
+use nexrad_core::{sites::RadarSite, types::{ElevationScan, RadarVolume}};
 use serde::Serialize;
 use std::sync::{Arc, RwLock};
 
@@ -8,8 +8,7 @@ use crate::{
     camera::orbit_camera::{CameraMode, OrbitCamera, OrbitCameraPlugin},
     rendering::{
         elevation_mesh::build_elevation_mesh,
-        isosurface_mesh::into_bevy_mesh,
-        radar_material::{IsoSurfaceMaterial, RadarMaterial},
+        radar_material::RadarMaterial,
         radar_texture::create_reflectivity_texture,
     },
 };
@@ -27,7 +26,6 @@ pub struct RadarVolumeSender(pub async_channel::Sender<RadarVolume>);
 #[derive(Resource, Default)]
 pub struct LoadStatus {
     pub radar_loaded: bool,
-    pub iso_loaded: bool,
 }
 
 // ── Internal resources / components ──────────────────────────────────────────
@@ -46,7 +44,6 @@ pub struct ExternalVolumeReceiver(pub async_channel::Receiver<RadarVolume>);
 /// Extend this enum to add new JS-controllable actions — no new WASM exports needed.
 #[derive(Debug, Clone)]
 pub enum JsCommand {
-    SetRenderMode(RenderMode),
     ResetCamera,
     SetElevationCount(u32),
     SetThreshold(f32),
@@ -57,10 +54,6 @@ impl JsCommand {
     pub fn from_json(json: &str) -> Option<Self> {
         let v: serde_json::Value = serde_json::from_str(json).ok()?;
         match v["type"].as_str()? {
-            "SetRenderMode" => {
-                let mode = RenderMode::from_str(v["mode"].as_str().unwrap_or("sweeps"));
-                Some(JsCommand::SetRenderMode(mode))
-            }
             "ResetCamera" => Some(JsCommand::ResetCamera),
             "SetElevationCount" => {
                 let count = v["count"].as_u64()? as u32;
@@ -91,8 +84,6 @@ pub struct JsCommandReceiver(pub async_channel::Receiver<JsCommand>);
 #[derive(Serialize, Clone, Default)]
 pub struct UiState {
     pub radar_loaded: bool,
-    pub iso_loaded: bool,
-    pub render_mode: String,
     pub active_site: Option<String>,
     pub elevation_count: u32,
     pub elevation_total: u32,
@@ -129,34 +120,12 @@ impl StateNotifier {
     }
 }
 
-#[derive(Resource)]
-pub struct IsoSurfaceChannel {
-    pub(crate) tx: async_channel::Sender<Vec<IsoMeshData>>,
-    pub(crate) rx: async_channel::Receiver<Vec<IsoMeshData>>,
-}
-
-/// Holds the sorted elevation scans and tracks isosurface compute state.
-/// Used to derive isosurface on-demand when the user first toggles to iso mode.
-#[derive(Resource, Default)]
-pub(crate) struct IsoDerivationState {
-    pub scans: Vec<ElevationScan>,
-    pub computed: IsoComputeStatus,
-}
-
-#[derive(Default, PartialEq, Eq, Clone, Copy)]
-pub(crate) enum IsoComputeStatus {
-    #[default]
-    NotStarted,
-    InProgress,
-    Done,
-}
-
 /// Current UI state mirrored from Bevy resources. Updated and pushed to JS on change.
 #[derive(Resource, Default)]
 pub(crate) struct UiStateResource(pub UiState);
 
 /// World-space position of the currently loaded radar site.
-/// Shared between receive_radar_data and receive_isosurface_data so both place
+/// Shared between receive_radar_data and other systems so they place
 /// entities at the correct absolute position.
 #[derive(Resource, Default)]
 pub(crate) struct CurrentSiteWorldPos(pub Vec3);
@@ -176,10 +145,6 @@ pub struct ElevationIndex(pub u32);
 /// Marker for the base (tilt 0) elevation entity, used for fast animation texture swaps.
 #[derive(Component)]
 pub struct BaseElevationMarker;
-
-/// Marks entities that belong to the derived isosurface rendering mode.
-#[derive(Component)]
-pub struct RadarIsoSurface;
 
 // ── Animation frame types ──────────────────────────────────────────────────
 
@@ -202,55 +167,6 @@ pub struct BaseTextureDims {
     pub num_gates: usize,
 }
 
-// ── Render mode ───────────────────────────────────────────────────────────────
-
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RenderMode {
-    Sweeps,
-    IsoSurface,
-    Combined,
-}
-
-impl Default for RenderMode {
-    fn default() -> Self {
-        Self::Sweeps
-    }
-}
-
-impl RenderMode {
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "isosurface" => RenderMode::IsoSurface,
-            "combined" => RenderMode::Combined,
-            _ => RenderMode::Sweeps,
-        }
-    }
-
-    pub fn next(self) -> Self {
-        match self {
-            RenderMode::Sweeps => RenderMode::IsoSurface,
-            RenderMode::IsoSurface => RenderMode::Combined,
-            RenderMode::Combined => RenderMode::Sweeps,
-        }
-    }
-
-    pub fn shows_sweeps(self) -> bool {
-        matches!(self, RenderMode::Sweeps | RenderMode::Combined)
-    }
-
-    pub fn shows_isosurface(self) -> bool {
-        matches!(self, RenderMode::IsoSurface | RenderMode::Combined)
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            RenderMode::Sweeps => "sweeps",
-            RenderMode::IsoSurface => "isosurface",
-            RenderMode::Combined => "combined",
-        }
-    }
-}
-
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 /// Core radar rendering plugin. Add to your `App` before `DefaultPlugins`.
@@ -260,25 +176,16 @@ impl RenderMode {
 ///
 /// For WASM, insert `ExternalVolumeReceiver(rx)` before adding this plugin;
 /// the plugin will consume it and drain volumes into the scene.
-pub struct RadarPlugin {
-    pub initial_mode: RenderMode,
-}
-
-impl Default for RadarPlugin {
-    fn default() -> Self {
-        Self { initial_mode: RenderMode::Sweeps }
-    }
-}
+#[derive(Default)]
+pub struct RadarPlugin;
 
 impl Plugin for RadarPlugin {
     fn build(&self, app: &mut App) {
         // Embed WGSL shaders at compile time so they work on WASM without
         // any filesystem/HTTP asset loading.
         embedded_asset!(app, "rendering/shaders/radar_elevation.wgsl");
-        embedded_asset!(app, "rendering/shaders/isosurface.wgsl");
 
         let (radar_tx, radar_rx) = async_channel::unbounded::<RadarVolume>();
-        let (iso_tx, iso_rx) = async_channel::unbounded::<Vec<IsoMeshData>>();
 
         app.insert_resource(RadarVolumeSender(radar_tx.clone()))
             .insert_resource(RadarDataChannel(radar_rx));
@@ -292,7 +199,7 @@ impl Plugin for RadarPlugin {
         }
 
         if app.world().get_resource::<JsCommandReceiver>().is_some() {
-            app.add_systems(Update, drain_js_commands.before(toggle_render_mode));
+            app.add_systems(Update, drain_js_commands);
         }
 
         if app.world().get_resource::<AnimationFrameSlot>().is_some() {
@@ -300,24 +207,17 @@ impl Plugin for RadarPlugin {
                 .add_systems(Update, receive_animation_frame);
         }
 
-        app.insert_resource(IsoSurfaceChannel { tx: iso_tx, rx: iso_rx })
-            .insert_resource(self.initial_mode)
-            .init_resource::<LoadStatus>()
+        app.init_resource::<LoadStatus>()
             .init_resource::<StateNotifier>()
             .init_resource::<UiStateResource>()
             .init_resource::<CurrentSiteWorldPos>()
             .init_resource::<ElevationCount>()
             .init_resource::<ThresholdDbz>()
-            .init_resource::<IsoDerivationState>()
             .add_plugins(BasemapPlugin)
             .add_plugins(OrbitCameraPlugin)
             .add_plugins(MaterialPlugin::<RadarMaterial>::default())
-            .add_plugins(MaterialPlugin::<IsoSurfaceMaterial>::default())
             .add_systems(Startup, setup_scene_lighting)
-            .add_systems(
-                Update,
-                (receive_radar_data, receive_isosurface_data, toggle_render_mode),
-            );
+            .add_systems(Update, receive_radar_data);
     }
 }
 
@@ -384,7 +284,6 @@ fn spawn_elevation_entities(
     materials: &mut Assets<RadarMaterial>,
     images: &mut Assets<Image>,
     scans: &[ElevationScan],
-    mode: &RenderMode,
     elev_count: &ElevationCount,
     threshold: &ThresholdDbz,
     site_offset: Vec3,
@@ -397,7 +296,7 @@ fn spawn_elevation_entities(
             reflectivity_texture: texture,
             params: Vec4::new(threshold.0, 0.0, 0.0, 0.0),
         });
-        let visible = mode.shows_sweeps() && (i as u32) < elev_count.current;
+        let visible = (i as u32) < elev_count.current;
         let mut entity = commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(material),
@@ -416,7 +315,6 @@ fn receive_radar_data(
     mut commands: Commands,
     channel: Res<RadarDataChannel>,
     old_elevations: Query<Entity, With<RadarElevation>>,
-    mode: Res<RenderMode>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<RadarMaterial>>,
     mut images: ResMut<Assets<Image>>,
@@ -427,7 +325,6 @@ fn receive_radar_data(
     mut camera: Query<&mut OrbitCamera>,
     mut elev_count: ResMut<ElevationCount>,
     threshold: Res<ThresholdDbz>,
-    mut iso_derivation: ResMut<IsoDerivationState>,
 ) {
     let Ok(volume) = channel.0.try_recv() else {
         return;
@@ -467,24 +364,14 @@ fn receive_radar_data(
         &mut materials,
         &mut images,
         &scans,
-        &mode,
         &elev_count,
         &threshold,
         offset,
     );
 
-    // Store scans for on-demand isosurface derivation (no auto-compute).
-    // Isosurface will be derived lazily when the user first toggles to iso mode.
-    iso_derivation.scans = scans.clone();
-    iso_derivation.computed = IsoComputeStatus::NotStarted;
-
     log::info!("loaded {} elevation sweeps from {}", scans.len(), volume.site);
     status.radar_loaded = true;
-    // iso_loaded = true so the UI shows "Ready" (iso will be derived on-demand)
-    status.iso_loaded = true;
     ui_state.0.radar_loaded = true;
-    ui_state.0.iso_loaded = true;
-    ui_state.0.render_mode = mode.label().to_string();
     ui_state.0.active_site = Some(volume.site.clone());
     ui_state.0.elevation_count = elev_count.current;
     ui_state.0.elevation_total = elev_count.total;
@@ -492,137 +379,24 @@ fn receive_radar_data(
     notifier.notify(&ui_state.0);
 }
 
-/// Spawn the isosurface computation off the Bevy main thread on native,
-/// or run it synchronously on WASM (acceptable until GPU pipeline replaces it).
-fn kick_off_isosurface(
-    tx: async_channel::Sender<Vec<IsoMeshData>>,
-    scans: Vec<ElevationScan>,
-) {
-    #[cfg(not(target_arch = "wasm32"))]
-    std::thread::spawn(move || {
-        let surfaces = nexrad_core::isosurface::build_threshold_surfaces(&scans);
-        if !surfaces.is_empty() {
-            let _ = tx.try_send(surfaces);
-        }
-    });
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let surfaces = nexrad_core::isosurface::build_threshold_surfaces(&scans);
-        if !surfaces.is_empty() {
-            let _ = tx.try_send(surfaces);
-        }
-    }
-}
-
-fn receive_isosurface_data(
-    mut commands: Commands,
-    iso_channel: Res<IsoSurfaceChannel>,
-    old_iso: Query<Entity, With<RadarIsoSurface>>,
-    mode: Res<RenderMode>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut iso_materials: ResMut<Assets<IsoSurfaceMaterial>>,
-    notifier: Res<StateNotifier>,
-    mut ui_state: ResMut<UiStateResource>,
-    site_world_pos: Res<CurrentSiteWorldPos>,
-    mut iso_derivation: ResMut<IsoDerivationState>,
-) {
-    let Ok(surfaces) = iso_channel.rx.try_recv() else {
-        return;
-    };
-
-    for entity in &old_iso {
-        commands.entity(entity).despawn();
-    }
-
-    let iso_visibility = if mode.shows_isosurface() {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    };
-
-    for mesh_data in surfaces {
-        let mesh = into_bevy_mesh(mesh_data);
-        let material = iso_materials.add(IsoSurfaceMaterial {});
-        commands.spawn((
-            Mesh3d(meshes.add(mesh)),
-            MeshMaterial3d(material),
-            Transform::from_translation(site_world_pos.0),
-            iso_visibility,
-            RadarIsoSurface,
-        ));
-    }
-
-    iso_derivation.computed = IsoComputeStatus::Done;
-    log::info!("derived isosurface meshes generated");
-    ui_state.0.iso_loaded = true;
-    notifier.notify(&ui_state.0);
-}
-
-fn apply_render_mode(
-    mode: &RenderMode,
-    sweeps: &mut Query<(&mut Visibility, &ElevationIndex), (With<RadarElevation>, Without<RadarIsoSurface>)>,
-    isos: &mut Query<&mut Visibility, (With<RadarIsoSurface>, Without<RadarElevation>)>,
-    elev_count: &ElevationCount,
-) {
-    let isos_visible = mode.shows_isosurface();
-    for (mut v, idx) in sweeps.iter_mut() {
-        *v = if mode.shows_sweeps() && idx.0 < elev_count.current {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-    for mut v in isos.iter_mut() {
-        *v = if isos_visible { Visibility::Visible } else { Visibility::Hidden };
-    }
-}
-
 fn drain_js_commands(
     receiver: Res<JsCommandReceiver>,
-    mut mode: ResMut<RenderMode>,
     mut camera: Query<&mut OrbitCamera>,
-    mut sweeps: Query<(&mut Visibility, &ElevationIndex), (With<RadarElevation>, Without<RadarIsoSurface>)>,
-    mut isos: Query<&mut Visibility, (With<RadarIsoSurface>, Without<RadarElevation>)>,
+    mut sweeps: Query<(&mut Visibility, &ElevationIndex), With<RadarElevation>>,
     notifier: Res<StateNotifier>,
     mut ui_state: ResMut<UiStateResource>,
-    status: Res<LoadStatus>,
     mut elev_count: ResMut<ElevationCount>,
     mut threshold: ResMut<ThresholdDbz>,
     elev_material_handles: Query<&MeshMaterial3d<RadarMaterial>, With<RadarElevation>>,
     mut radar_materials: ResMut<Assets<RadarMaterial>>,
     mut camera_mode: ResMut<CameraMode>,
-    mut iso_derivation: ResMut<IsoDerivationState>,
-    iso_channel: Res<IsoSurfaceChannel>,
 ) {
     while let Ok(cmd) = receiver.0.try_recv() {
         match cmd {
-            JsCommand::SetRenderMode(new_mode) => {
-                // Kick off isosurface derivation on-demand if needed
-                if new_mode.shows_isosurface()
-                    && iso_derivation.computed == IsoComputeStatus::NotStarted
-                    && !iso_derivation.scans.is_empty()
-                {
-                    iso_derivation.computed = IsoComputeStatus::InProgress;
-                    kick_off_isosurface(
-                        iso_channel.tx.clone(),
-                        iso_derivation.scans.clone(),
-                    );
-                    log::info!("isosurface derivation started on-demand");
-                }
-
-                *mode = new_mode;
-                apply_render_mode(&mode, &mut sweeps, &mut isos, &elev_count);
-                log::info!("JS set render mode: {}", mode.label());
-                ui_state.0.render_mode = mode.label().to_string();
-                ui_state.0.radar_loaded = status.radar_loaded;
-                ui_state.0.iso_loaded = status.iso_loaded;
-                notifier.notify(&ui_state.0);
-            }
             JsCommand::SetElevationCount(count) => {
                 elev_count.current = count.min(elev_count.total);
                 for (mut v, idx) in sweeps.iter_mut() {
-                    *v = if mode.shows_sweeps() && idx.0 < elev_count.current {
+                    *v = if idx.0 < elev_count.current {
                         Visibility::Visible
                     } else {
                         Visibility::Hidden
@@ -725,43 +499,3 @@ fn receive_animation_frame(
     }
 }
 
-fn toggle_render_mode(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut mode: ResMut<RenderMode>,
-    mut sweeps: Query<(&mut Visibility, &ElevationIndex), (With<RadarElevation>, Without<RadarIsoSurface>)>,
-    mut isos: Query<&mut Visibility, (With<RadarIsoSurface>, Without<RadarElevation>)>,
-    notifier: Res<StateNotifier>,
-    mut ui_state: ResMut<UiStateResource>,
-    status: Res<LoadStatus>,
-    elev_count: Res<ElevationCount>,
-    mut iso_derivation: ResMut<IsoDerivationState>,
-    iso_channel: Res<IsoSurfaceChannel>,
-) {
-    if !keys.just_pressed(KeyCode::KeyV) {
-        return;
-    }
-
-    let new_mode = mode.next();
-
-    // Kick off isosurface derivation on-demand if needed
-    if new_mode.shows_isosurface()
-        && iso_derivation.computed == IsoComputeStatus::NotStarted
-        && !iso_derivation.scans.is_empty()
-    {
-        iso_derivation.computed = IsoComputeStatus::InProgress;
-        kick_off_isosurface(iso_channel.tx.clone(), iso_derivation.scans.clone());
-        log::info!("isosurface derivation started on-demand (keyboard)");
-    }
-
-    *mode = new_mode;
-    apply_render_mode(&mode, &mut sweeps, &mut isos, &elev_count);
-
-    log::info!(
-        "render mode: {} (press V to cycle sweeps → isosurface → combined)",
-        mode.label()
-    );
-    ui_state.0.render_mode = mode.label().to_string();
-    ui_state.0.radar_loaded = status.radar_loaded;
-    ui_state.0.iso_loaded = status.iso_loaded;
-    notifier.notify(&ui_state.0);
-}

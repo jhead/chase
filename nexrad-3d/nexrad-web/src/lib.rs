@@ -69,7 +69,7 @@ pub fn set_state_callback(cb: js_sys::Function) {
 }
 
 /// Send a command to the Bevy renderer. `json` is a JSON-serialized JsCommand discriminated union.
-/// Example: `{"type":"SetRenderMode","mode":"isosurface"}`
+/// Example: `{"type":"SetThreshold","dbz":20}`
 #[wasm_bindgen]
 pub fn send_command(json: &str) {
     if let Some(cmd) = JsCommand::from_json(json) {

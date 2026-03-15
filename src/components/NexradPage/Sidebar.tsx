@@ -99,18 +99,11 @@ export function Sidebar({ animationState, onSetSpeed, onToggleLoop, onSelectSite
         </ProductGrid>
       </Section>
 
-      {/* Layers — mirrors CanvasButtons for users who prefer sidebar */}
+      {/* Layers */}
       <Section>
         <SectionLabel>Layers</SectionLabel>
-        <LayerRow
-          active={uiState.render_mode === "sweeps" || uiState.render_mode === "combined"}
-        >
+        <LayerRow active={uiState.radar_loaded}>
           Elevation Sweeps
-        </LayerRow>
-        <LayerRow
-          active={uiState.render_mode === "isosurface" || uiState.render_mode === "combined"}
-        >
-          IsoSurface
         </LayerRow>
       </Section>
 

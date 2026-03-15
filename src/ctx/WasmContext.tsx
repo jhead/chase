@@ -18,7 +18,6 @@ export interface NexradWasm {
 
 /** Discriminated union of all commands JS can send to the Bevy renderer. */
 export type JsCommand =
-  | { type: "SetRenderMode"; mode: "sweeps" | "isosurface" | "combined" }
   | { type: "ResetCamera" }
   | { type: "SetElevationCount"; count: number }
   | { type: "SetThreshold"; dbz: number }
@@ -28,8 +27,6 @@ export type JsCommand =
 /** Serializable state pushed from Bevy to React on meaningful changes. */
 export interface UiState {
   radar_loaded: boolean;
-  iso_loaded: boolean;
-  render_mode: "sweeps" | "isosurface" | "combined";
   active_site: string | null;
   elevation_count: number;
   elevation_total: number;
@@ -38,8 +35,6 @@ export interface UiState {
 
 const DEFAULT_UI_STATE: UiState = {
   radar_loaded: false,
-  iso_loaded: false,
-  render_mode: "sweeps",
   active_site: null,
   elevation_count: 0,
   elevation_total: 0,

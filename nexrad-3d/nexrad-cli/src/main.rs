@@ -9,7 +9,7 @@ use clap::Parser;
 use nexrad_core::sites::RadarSite;
 use nexrad_render::{
     camera::orbit_camera::OrbitCamera,
-    BasemapConfig, LoadStatus, RadarPlugin, RadarVolumeSender, RenderMode,
+    BasemapConfig, LoadStatus, RadarPlugin, RadarVolumeSender,
 };
 
 #[derive(Parser, Resource, Debug, Clone)]
@@ -18,10 +18,6 @@ struct CliArgs {
     /// Radar site to load (e.g., KHTX)
     #[arg(short, long, default_value = "KHTX")]
     site: String,
-
-    /// Render mode (sweeps, isosurface, or combined)
-    #[arg(short, long, default_value = "sweeps")]
-    mode: String,
 
     /// Output file path for the screenshot
     #[arg(short, long)]
@@ -42,7 +38,6 @@ struct ScreenshotState {
 
 fn main() {
     let args = CliArgs::parse();
-    let initial_mode = RenderMode::from_str(&args.mode);
     let is_headless = args.output.is_some();
 
     // Set the basemap origin to the selected radar site's coordinates.
@@ -64,7 +59,7 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(RadarPlugin { initial_mode })
+        .add_plugins(RadarPlugin)
         .insert_resource(basemap_config)
         .insert_resource(args)
         .init_resource::<ScreenshotState>()
@@ -166,7 +161,6 @@ fn start_radar_fetch(sender: Res<RadarVolumeSender>, args: Res<CliArgs>) {
 fn screenshot_and_exit(
     mut commands: Commands,
     args: Res<CliArgs>,
-    mode: Res<RenderMode>,
     status: Res<LoadStatus>,
     mut state: ResMut<ScreenshotState>,
     mut app_exit: MessageWriter<AppExit>,
@@ -189,13 +183,7 @@ fn screenshot_and_exit(
         return;
     }
 
-    let ready = match *mode {
-        RenderMode::Sweeps => status.radar_loaded,
-        RenderMode::IsoSurface => status.iso_loaded,
-        RenderMode::Combined => status.radar_loaded && status.iso_loaded,
-    };
-
-    if ready {
+    if status.radar_loaded {
         state.frames_since_ready += 1;
         if state.frames_since_ready > 60 {
             if let Ok(window_entity) = main_window.single() {

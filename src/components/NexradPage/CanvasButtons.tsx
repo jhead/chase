@@ -3,15 +3,8 @@ import { useState } from "react";
 import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
 
-type RenderMode = "sweeps" | "isosurface" | "combined";
 type PaneLayout = "single" | "split-h" | "split-v" | "quad";
 type CameraMode = "2d" | "3d";
-
-const RENDER_MODES: { mode: RenderMode; label: string; title: string }[] = [
-  { mode: "sweeps",     label: "S", title: "Sweeps" },
-  { mode: "isosurface", label: "I", title: "IsoSurface" },
-  { mode: "combined",   label: "C", title: "Combined" },
-];
 
 const PANE_LAYOUTS: { layout: PaneLayout; label: string; title: string; stub: boolean }[] = [
   { layout: "single",  label: "□", title: "Single pane",     stub: false },
@@ -25,13 +18,8 @@ const CAMERA_MODES: { mode: CameraMode; label: string; title: string }[] = [
 ];
 
 export function CanvasButtons() {
-  const { sendCommand, uiState } = useWasm();
-  const currentMode = uiState.render_mode;
+  const { sendCommand } = useWasm();
   const [cameraMode, setCameraMode] = useState<CameraMode>("2d");
-
-  function setRenderMode(mode: RenderMode) {
-    sendCommand({ type: "SetRenderMode", mode });
-  }
 
   function setCamMode(mode: CameraMode) {
     setCameraMode(mode);
@@ -40,18 +28,6 @@ export function CanvasButtons() {
 
   return (
     <Group>
-      <ButtonGroup>
-        {RENDER_MODES.map(({ mode, label, title }) => (
-          <IconButton
-            key={mode}
-            title={title}
-            active={currentMode === mode}
-            onClick={() => setRenderMode(mode)}
-          >
-            {label}
-          </IconButton>
-        ))}
-      </ButtonGroup>
       <ButtonGroup>
         {CAMERA_MODES.map(({ mode, label, title }) => (
           <IconButton

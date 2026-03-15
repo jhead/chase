@@ -25,20 +25,11 @@ export function TopBar({
   onCycleSpeed,
 }: TopBarProps) {
   const { uiState } = useWasm();
-  const { radar_loaded, iso_loaded, active_site } = uiState;
+  const { radar_loaded, active_site } = uiState;
   const { playing, frameIndex, frameCount, speed, timestamps, ready } = animation;
 
-  const loadingText = !radar_loaded
-    ? "Loading..."
-    : !iso_loaded
-    ? "Building iso..."
-    : "Ready";
-
-  const loadingColor = !radar_loaded
-    ? theme.textDim
-    : !iso_loaded
-    ? theme.accent
-    : "#4caf7d";
+  const loadingText = radar_loaded ? "Ready" : "Loading...";
+  const loadingColor = radar_loaded ? "#4caf7d" : theme.textDim;
 
   const enabled = ready && radar_loaded;
   const frameLabel =
