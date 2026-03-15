@@ -4,8 +4,9 @@ import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
 import type { AnimationState } from "../../hooks/useMultiLayerAnimation";
 import type { Layer, AlertsLayer, RadarLayer, Product } from "../../hooks/useLayers";
-import { LayerCard } from "./LayerCard";
+import type { AlertFeature } from "../../hooks/useAlertsData";
 import { RadarLayerCard } from "./RadarLayerCard";
+import { AlertsLayerCard } from "./AlertsLayerCard";
 
 interface SidebarProps {
   animationState: AnimationState;
@@ -16,6 +17,10 @@ interface SidebarProps {
   addLayer: (kind: "radar") => void;
   removeLayer: (id: string) => void;
   updateLayer: <T extends Layer>(id: string, updates: Partial<T>) => void;
+  activeAlert: AlertFeature | null;
+  onDismissAlert: () => void;
+  alertCount: number;
+  lastUpdated: Date | null;
 }
 
 export function Sidebar({
@@ -27,11 +32,16 @@ export function Sidebar({
   addLayer,
   removeLayer,
   updateLayer,
+  activeAlert,
+  onDismissAlert,
+  alertCount,
+  lastUpdated,
 }: SidebarProps) {
   const [expanded, setExpanded] = useState(true);
   const { uiState, sendCommand } = useWasm();
 
   const radarLayers = layers.filter((l): l is RadarLayer => l.kind === "radar");
+  const alertsLayers = layers.filter((l): l is AlertsLayer => l.kind === "nws-alerts");
 
   if (!expanded) {
     return (
@@ -53,45 +63,63 @@ export function Sidebar({
       <Section>
         <SectionLabel>Layers</SectionLabel>
 
-        {radarLayers.map((layer) => {
-          const layerUiState = uiState.radar_layers.find((s) => s.layer_id === layer.id) ?? null;
+        {layers.map((layer) => {
+          if (layer.kind === "radar") {
+            const layerUiState = uiState.radar_layers.find((s) => s.layer_id === layer.id) ?? null;
+            return (
+              <RadarLayerCard
+                key={layer.id}
+                layer={layer}
+                layerUiState={layerUiState}
+                canRemove={radarLayers.length > 1}
+                onToggle={() => updateLayer(layer.id, { enabled: !layer.enabled })}
+                onRemove={() => {
+                  removeLayer(layer.id);
+                  sendCommand({ type: "RemoveLayer", layer_id: layer.id });
+                }}
+                onSiteSelect={(siteId) => {
+                  updateLayer(layer.id, { siteId });
+                  onSelectSite(layer.id, siteId);
+                }}
+                onProductChange={(product: Product) => updateLayer(layer.id, { product })}
+              />
+            );
+          }
           return (
-            <RadarLayerCard
+            <AlertsLayerCard
               key={layer.id}
               layer={layer}
-              layerUiState={layerUiState}
-              canRemove={radarLayers.length > 1}
+              alertCount={alertCount}
+              lastUpdated={lastUpdated}
+              canRemove={alertsLayers.length > 1}
               onToggle={() => updateLayer(layer.id, { enabled: !layer.enabled })}
               onRemove={() => {
                 removeLayer(layer.id);
-                sendCommand({ type: "RemoveLayer", layer_id: layer.id });
+                sendCommand({ type: "ClearAlerts", layer_id: layer.id });
               }}
-              onSiteSelect={(siteId) => {
-                updateLayer(layer.id, { siteId });
-                onSelectSite(layer.id, siteId);
-              }}
-              onProductChange={(product: Product) => updateLayer(layer.id, { product })}
+              onUpdateLayer={(updates) => updateLayer(layer.id, updates)}
             />
           );
         })}
 
         <AddLayerBtn onClick={() => addLayer("radar")}>+ Radar</AddLayerBtn>
-
-        <LayerDivider />
-
-        {/* NWS Alerts */}
-        {layers
-          .filter((l): l is AlertsLayer => l.kind === "nws-alerts")
-          .map((layer) => (
-            <LayerCard
-              key={layer.id}
-              label="NWS Alerts"
-              enabled={false}
-              onToggle={() => {}}
-              disabled
-            />
-          ))}
       </Section>
+
+      {/* Alert detail panel — dismissable */}
+      {activeAlert && (
+        <AlertDetailSection>
+          <AlertDetailHeader>
+            <AlertDetailTitle>{activeAlert.ps}</AlertDetailTitle>
+            <DismissBtn onClick={onDismissAlert} title="Dismiss">×</DismissBtn>
+          </AlertDetailHeader>
+          <AlertDetailMeta>
+            {activeAlert.wfo} · Expires {formatAlertTime(activeAlert.expires)}
+          </AlertDetailMeta>
+          <AlertDetailScroll>
+            {activeAlert.raw ?? `${activeAlert.ps} — ${activeAlert.id}. Issued ${activeAlert.issued}.`}
+          </AlertDetailScroll>
+        </AlertDetailSection>
+      )}
 
       {/* Animation */}
       {animationState.ready && (
@@ -212,12 +240,6 @@ const SubLabel = styled.span`
   color: ${theme.textSecondary};
 `;
 
-const LayerDivider = styled.div`
-  height: 1px;
-  background: ${theme.border};
-  margin: 2px 0;
-`;
-
 const AddLayerBtn = styled.button`
   background: none;
   border: 1px dashed ${theme.border};
@@ -280,4 +302,69 @@ const FrameCountLabel = styled.span`
   font-family: ${theme.fontMono};
   font-size: 10px;
   color: ${theme.textDim};
+`;
+
+// ── Alert detail panel ───────────────────────────────────────────────────────
+
+function formatAlertTime(iso: string): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+  } catch {
+    return iso;
+  }
+}
+
+const AlertDetailSection = styled.div`
+  padding: 10px;
+  border-top: 1px solid ${theme.border};
+  background: rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  flex-shrink: 0;
+`;
+
+const AlertDetailHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+`;
+
+const AlertDetailTitle = styled.span`
+  font-family: ${theme.fontSans};
+  font-size: 12px;
+  font-weight: 600;
+  color: ${theme.textPrimary};
+`;
+
+const DismissBtn = styled.button`
+  background: none;
+  border: none;
+  color: ${theme.textDim};
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  &:hover { color: ${theme.textSecondary}; }
+`;
+
+const AlertDetailMeta = styled.span`
+  font-family: ${theme.fontMono};
+  font-size: 10px;
+  color: ${theme.textDim};
+`;
+
+const AlertDetailScroll = styled.div`
+  font-family: ${theme.fontSans};
+  font-size: 11px;
+  color: ${theme.textSecondary};
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 `;

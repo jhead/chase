@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useRef } from "react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -14,7 +14,15 @@ export interface NexradWasm {
   commit_volume: (layer_id: string, site_id: string) => void;
   send_command: (json: string) => void;
   set_state_callback: (cb: (stateJson: string) => void) => void;
+  set_alert_click_callback: (cb: (alertId: string) => void) => void;
   update_layer_texture: (layer_id: string, num_rays: number, num_gates: number, data: Uint8Array) => void;
+}
+
+/** Payload for one alert polygon sent to Bevy. */
+export interface AlertPolygonPayload {
+  id: string;
+  coordinates: [number, number][]; // [lng, lat] GeoJSON order
+  color: [number, number, number, number]; // RGBA 0–1
 }
 
 /** Discriminated union of all commands JS can send to the Bevy renderer. */
@@ -23,7 +31,9 @@ export type JsCommand =
   | { type: "RemoveLayer"; layer_id: string }
   | { type: "SetElevationCount"; layer_id: string; count: number }
   | { type: "SetThreshold"; layer_id: string; dbz: number }
-  | { type: "SetCameraMode"; mode: "2d" | "3d" };
+  | { type: "SetCameraMode"; mode: "2d" | "3d" }
+  | { type: "SetAlerts"; layer_id: string; alerts: AlertPolygonPayload[] }
+  | { type: "ClearAlerts"; layer_id: string };
 
 /** Per-layer state snapshot pushed from Bevy. */
 export interface UiRadarLayerState {
@@ -88,6 +98,8 @@ interface WasmContextValue {
   isReady: boolean;
   uiState: UiState;
   sendCommand: (cmd: JsCommand) => void;
+  activeAlertId: string | null;
+  dismissAlert: () => void;
 }
 
 const WasmContext = createContext<WasmContextValue>({
@@ -95,6 +107,8 @@ const WasmContext = createContext<WasmContextValue>({
   isReady: false,
   uiState: DEFAULT_UI_STATE,
   sendCommand: () => {},
+  activeAlertId: null,
+  dismissAlert: () => {},
 });
 
 export function useWasm() {
@@ -106,6 +120,9 @@ export function useWasm() {
 export function WasmProvider({ children }: { children: React.ReactNode }) {
   const [wasm, setWasm] = useState<NexradWasm | null>(null);
   const [uiState, setUiState] = useState<UiState>(DEFAULT_UI_STATE);
+  const [activeAlertId, setActiveAlertId] = useState<string | null>(null);
+  const setActiveAlertIdRef = useRef(setActiveAlertId);
+  setActiveAlertIdRef.current = setActiveAlertId;
 
   useEffect(() => {
     loadWasm()
@@ -117,6 +134,9 @@ export function WasmProvider({ children }: { children: React.ReactNode }) {
             console.error("[WasmContext] Failed to parse UiState:", stateJson);
           }
         });
+        mod.set_alert_click_callback((alertId: string) => {
+          setActiveAlertIdRef.current(alertId);
+        });
         setWasm(mod);
       })
       .catch((err) => console.error("[WasmContext] WASM failed to load:", err));
@@ -126,9 +146,20 @@ export function WasmProvider({ children }: { children: React.ReactNode }) {
     wasmModule?.send_command(JSON.stringify(cmd));
   }
 
+  function dismissAlert() {
+    setActiveAlertId(null);
+  }
+
   return (
     <WasmContext.Provider
-      value={{ wasm, isReady: wasm !== null, uiState, sendCommand }}
+      value={{
+        wasm,
+        isReady: wasm !== null,
+        uiState,
+        sendCommand,
+        activeAlertId,
+        dismissAlert,
+      }}
     >
       {children}
     </WasmContext.Provider>

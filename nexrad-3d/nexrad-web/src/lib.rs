@@ -2,8 +2,9 @@ use async_channel::Sender;
 use bevy::prelude::*;
 use nexrad_core::types::{ElevationScan, RadarVolume};
 use nexrad_render::{
-    AnimationFrame, AnimationFrameSlots, ExternalVolumeReceiver, JsCommand, JsCommandReceiver,
-    RadarPlugin, StateNotifier, TaggedVolume, UiState,
+    AlertClickCallback, AlertCommand, AlertCommandReceiver, AlertCommandSender,
+    AnimationFrame, AnimationFrameSlots, AlertsPlugin, ExternalVolumeReceiver, JsCommand,
+    JsCommandReceiver, RadarPlugin, StateNotifier, TaggedVolume, UiState,
 };
 use std::{
     collections::HashMap,
@@ -27,6 +28,9 @@ static ANIM_SLOTS: OnceLock<AnimationFrameSlots> = OnceLock::new();
 /// JS callback registered via set_state_callback(). Called on state change.
 static STATE_CB: OnceLock<js_sys::Function> = OnceLock::new();
 
+/// JS callback registered via set_alert_click_callback(). Called when an alert polygon is clicked.
+static ALERT_CLICK_CB: OnceLock<js_sys::Function> = OnceLock::new();
+
 #[wasm_bindgen(start)]
 pub fn run() {
     #[cfg(target_arch = "wasm32")]
@@ -34,6 +38,7 @@ pub fn run() {
 
     let (vol_tx, vol_rx) = async_channel::unbounded::<TaggedVolume>();
     let (cmd_tx, cmd_rx) = async_channel::unbounded::<JsCommand>();
+    let (alert_cmd_tx, alert_cmd_rx) = async_channel::unbounded::<AlertCommand>();
     let anim_slots = AnimationFrameSlots::default();
 
     VOLUME_TX.set(vol_tx).ok();
@@ -44,12 +49,19 @@ pub fn run() {
     App::new()
         .insert_resource(ExternalVolumeReceiver(vol_rx))
         .insert_resource(JsCommandReceiver(cmd_rx))
+        .insert_resource(AlertCommandSender(alert_cmd_tx))
+        .insert_resource(AlertCommandReceiver(alert_cmd_rx))
         .insert_resource(anim_slots)
         .insert_resource(StateNotifier(Some(Box::new(|state: &UiState| {
             if let Some(cb) = STATE_CB.get() {
                 if let Ok(json) = serde_json::to_string(state) {
                     let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&json));
                 }
+            }
+        }))))
+        .insert_resource(AlertClickCallback(Some(Box::new(|alert_id: &str| {
+            if let Some(cb) = ALERT_CLICK_CB.get() {
+                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(alert_id));
             }
         }))))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -62,7 +74,14 @@ pub fn run() {
             ..default()
         }))
         .add_plugins(RadarPlugin::default())
+        .add_plugins(AlertsPlugin)
         .run();
+}
+
+/// Register a JS callback to run when an alert polygon is clicked. Receives the alert ID string.
+#[wasm_bindgen]
+pub fn set_alert_click_callback(cb: js_sys::Function) {
+    ALERT_CLICK_CB.set(cb).ok();
 }
 
 /// Register a JS callback to receive UiState updates from Bevy.

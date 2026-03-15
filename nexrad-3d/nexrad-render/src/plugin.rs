@@ -1,6 +1,6 @@
 use bevy::{asset::embedded_asset, light::GlobalAmbientLight, prelude::*};
 use nexrad_core::{sites::RadarSite, types::{ElevationScan, RadarVolume}};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
@@ -48,6 +48,27 @@ pub struct ExternalVolumeReceiver(pub async_channel::Receiver<TaggedVolume>);
 
 // ── JS ↔ Bevy IPC ─────────────────────────────────────────────────────────────
 
+/// One alert polygon payload (coordinates in GeoJSON [lng, lat] order).
+#[derive(Debug, Clone, Deserialize)]
+pub struct AlertPolygonData {
+    pub id: String,
+    pub coordinates: Vec<[f64; 2]>,
+    pub color: [f32; 4],
+}
+
+/// Commands forwarded from the main JS command channel to the AlertsPlugin.
+#[derive(Debug, Clone)]
+pub enum AlertCommand {
+    SetAlerts { layer_id: String, alerts: Vec<AlertPolygonData> },
+    ClearAlerts { layer_id: String },
+}
+
+#[derive(Resource)]
+pub struct AlertCommandSender(pub async_channel::Sender<AlertCommand>);
+
+#[derive(Resource)]
+pub struct AlertCommandReceiver(pub async_channel::Receiver<AlertCommand>);
+
 #[derive(Debug, Clone)]
 pub enum JsCommand {
     ResetCamera,
@@ -58,6 +79,10 @@ pub enum JsCommand {
     /// Set the minimum dBZ threshold for a specific radar layer.
     SetThreshold { layer_id: String, dbz: f32 },
     SetCameraMode(CameraMode),
+    /// Replace alert polygons for an alerts layer.
+    SetAlerts { layer_id: String, alerts: Vec<AlertPolygonData> },
+    /// Remove all alert polygons for an alerts layer.
+    ClearAlerts { layer_id: String },
 }
 
 impl JsCommand {
@@ -85,6 +110,15 @@ impl JsCommand {
                     _ => CameraMode::Pan2D,
                 };
                 Some(JsCommand::SetCameraMode(cam_mode))
+            }
+            "SetAlerts" => {
+                let layer_id = v["layer_id"].as_str()?.to_string();
+                let alerts: Vec<AlertPolygonData> = serde_json::from_value(v["alerts"].clone()).ok()?;
+                Some(JsCommand::SetAlerts { layer_id, alerts })
+            }
+            "ClearAlerts" => {
+                let layer_id = v["layer_id"].as_str()?.to_string();
+                Some(JsCommand::ClearAlerts { layer_id })
             }
             _ => None,
         }
@@ -425,6 +459,7 @@ fn receive_radar_data(
 fn drain_js_commands(
     mut commands: Commands,
     receiver: Res<JsCommandReceiver>,
+    alert_tx: Option<Res<AlertCommandSender>>,
     mut camera: Query<&mut OrbitCamera>,
     elevations: Query<(Entity, &LayerId), With<RadarElevation>>,
     mut sweeps: Query<(&mut Visibility, &ElevationIndex, &LayerId), With<RadarElevation>>,
@@ -437,6 +472,16 @@ fn drain_js_commands(
 ) {
     while let Ok(cmd) = receiver.0.try_recv() {
         match cmd {
+            JsCommand::SetAlerts { layer_id, alerts } => {
+                if let Some(tx) = &alert_tx {
+                    let _ = tx.0.try_send(AlertCommand::SetAlerts { layer_id, alerts });
+                }
+            }
+            JsCommand::ClearAlerts { layer_id } => {
+                if let Some(tx) = &alert_tx {
+                    let _ = tx.0.try_send(AlertCommand::ClearAlerts { layer_id });
+                }
+            }
             JsCommand::RemoveLayer { layer_id } => {
                 for (entity, lid) in &elevations {
                     if lid.0 == layer_id {
