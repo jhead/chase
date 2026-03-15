@@ -1,4 +1,8 @@
-import { RadarSite } from "../components/ChaserMap";
+export type RadarSite = {
+  id: string;
+  name: string;
+  coordinate: { lat: number; lng: number };
+};
 
 export const RADAR_SITES: RadarSite[] = [
   // Alaska
