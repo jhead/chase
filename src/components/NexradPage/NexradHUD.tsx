@@ -5,17 +5,21 @@ import { Sidebar } from "./Sidebar";
 import { CanvasButtons } from "./CanvasButtons";
 import { ReflectivityLegend } from "./ReflectivityLegend";
 import { ScrubBar } from "./ScrubBar";
-import { useRadarAnimation } from "../../hooks/useRadarAnimation";
+import { useLayers } from "../../hooks/useLayers";
+import { useMultiLayerAnimation } from "../../hooks/useMultiLayerAnimation";
+import type { RadarLayer } from "../../hooks/useLayers";
 
 export function NexradHUD() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  void sidebarOpen; // used via Sidebar's own collapsed state for now
+  void sidebarOpen;
 
-  const anim = useRadarAnimation();
+  const { layers, addLayer, removeLayer, updateLayer } = useLayers();
+  const radarLayers = layers.filter((l): l is RadarLayer => l.kind === "radar");
+
+  const anim = useMultiLayerAnimation(radarLayers);
 
   return (
     <Root>
-      {/* Top bar spans full width */}
       <TopBar
         onSiteClick={() => setSidebarOpen((v) => !v)}
         animation={anim.state}
@@ -27,22 +31,22 @@ export function NexradHUD() {
         onCycleSpeed={anim.cycleSpeed}
       />
 
-      {/* Below top bar: sidebar + canvas area */}
       <Body>
         <Sidebar
           animationState={anim.state}
           onSetSpeed={anim.setSpeed}
           onToggleLoop={anim.toggleLoop}
-          onSelectSite={anim.init}
+          onSelectSite={(layerId, siteId) => anim.initLayer(layerId, siteId)}
+          layers={layers}
+          addLayer={addLayer}
+          removeLayer={removeLayer}
+          updateLayer={updateLayer}
         />
         <CanvasArea>
-          {/* Blender-style corner buttons */}
           <CanvasButtons />
-          {/* Scrub bar overlaid above scale */}
           <ScrubBarWrap>
             <ScrubBar state={anim.state} onSeek={anim.seekTo} />
           </ScrubBarWrap>
-          {/* Color legend pinned to canvas bottom */}
           <ReflectivityLegend />
         </CanvasArea>
       </Body>
@@ -50,7 +54,6 @@ export function NexradHUD() {
   );
 }
 
-/** Full-screen overlay. pointer-events:none so Bevy gets mouse/scroll on the canvas. */
 const Root = styled.div`
   position: fixed;
   inset: 0;
@@ -64,7 +67,7 @@ const Body = styled.div`
   flex: 1;
   display: flex;
   overflow: hidden;
-  margin-top: 36px; /* height of TopBar */
+  margin-top: 36px;
 `;
 
 const CanvasArea = styled.div`
@@ -72,7 +75,6 @@ const CanvasArea = styled.div`
   position: relative;
 `;
 
-/** Positions scrub bar above ReflectivityLegend (32px). Enables pointer-events for interaction. */
 const ScrubBarWrap = styled.div`
   position: absolute;
   bottom: 32px;

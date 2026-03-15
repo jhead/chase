@@ -1,7 +1,10 @@
 use bevy::{asset::embedded_asset, light::GlobalAmbientLight, prelude::*};
 use nexrad_core::{sites::RadarSite, types::{ElevationScan, RadarVolume}};
 use serde::Serialize;
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use crate::{
     basemap::BasemapPlugin,
@@ -13,16 +16,21 @@ use crate::{
     },
 };
 
+// ── Tagged volume ─────────────────────────────────────────────────────────────
+
+/// A `RadarVolume` tagged with the React layer that owns it.
+pub struct TaggedVolume {
+    pub layer_id: String,
+    pub volume: RadarVolume,
+}
+
 // ── Public resources ─────────────────────────────────────────────────────────
 
-/// Send radar volumes into the Bevy scene. Obtained from the world after
-/// `RadarPlugin` has been added. Both the CLI fetch thread and the web
-/// `spawn_local` closure clone this and call `try_send`.
+/// Send radar volumes into the Bevy scene.
 #[derive(Resource, Clone)]
-pub struct RadarVolumeSender(pub async_channel::Sender<RadarVolume>);
+pub struct RadarVolumeSender(pub async_channel::Sender<TaggedVolume>);
 
-/// Tracks whether each layer of data has finished loading.
-/// Read by the CLI screenshot system to know when to capture.
+/// Tracks whether radar data has finished loading.
 #[derive(Resource, Default)]
 pub struct LoadStatus {
     pub radar_loaded: bool,
@@ -31,22 +39,24 @@ pub struct LoadStatus {
 // ── Internal resources / components ──────────────────────────────────────────
 
 #[derive(Resource)]
-pub(crate) struct RadarDataChannel(pub(crate) async_channel::Receiver<RadarVolume>);
+pub(crate) struct RadarDataChannel(pub(crate) async_channel::Receiver<TaggedVolume>);
 
 /// When set (e.g. by nexrad-web), a system drains this receiver and forwards
-/// each volume to `RadarVolumeSender`. Allows JS to push volumes without Rust fetch.
+/// each volume to `RadarVolumeSender`.
 #[derive(Resource)]
-pub struct ExternalVolumeReceiver(pub async_channel::Receiver<RadarVolume>);
+pub struct ExternalVolumeReceiver(pub async_channel::Receiver<TaggedVolume>);
 
 // ── JS ↔ Bevy IPC ─────────────────────────────────────────────────────────────
 
-/// Commands sent from JavaScript into the Bevy scene via `send_command(json)`.
-/// Extend this enum to add new JS-controllable actions — no new WASM exports needed.
 #[derive(Debug, Clone)]
 pub enum JsCommand {
     ResetCamera,
-    SetElevationCount(u32),
-    SetThreshold(f32),
+    /// Despawn all entities for a layer and remove its state.
+    RemoveLayer { layer_id: String },
+    /// Set how many elevation tilts are shown for a specific radar layer.
+    SetElevationCount { layer_id: String, count: u32 },
+    /// Set the minimum dBZ threshold for a specific radar layer.
+    SetThreshold { layer_id: String, dbz: f32 },
     SetCameraMode(CameraMode),
 }
 
@@ -55,13 +65,19 @@ impl JsCommand {
         let v: serde_json::Value = serde_json::from_str(json).ok()?;
         match v["type"].as_str()? {
             "ResetCamera" => Some(JsCommand::ResetCamera),
+            "RemoveLayer" => {
+                let layer_id = v["layer_id"].as_str()?.to_string();
+                Some(JsCommand::RemoveLayer { layer_id })
+            }
             "SetElevationCount" => {
+                let layer_id = v["layer_id"].as_str().unwrap_or("radar-1").to_string();
                 let count = v["count"].as_u64()? as u32;
-                Some(JsCommand::SetElevationCount(count))
+                Some(JsCommand::SetElevationCount { layer_id, count })
             }
             "SetThreshold" => {
+                let layer_id = v["layer_id"].as_str().unwrap_or("radar-1").to_string();
                 let dbz = v["dbz"].as_f64()? as f32;
-                Some(JsCommand::SetThreshold(dbz))
+                Some(JsCommand::SetThreshold { layer_id, dbz })
             }
             "SetCameraMode" => {
                 let cam_mode = match v["mode"].as_str().unwrap_or("2d") {
@@ -75,40 +91,74 @@ impl JsCommand {
     }
 }
 
-/// Receives `JsCommand`s from nexrad-web's static channel. Inserted by nexrad-web at startup.
 #[derive(Resource)]
 pub struct JsCommandReceiver(pub async_channel::Receiver<JsCommand>);
 
-/// Serializable snapshot of renderer state, pushed to JS on meaningful changes.
-/// Extend this struct to expose more state to the React HUD.
+// ── Per-layer state ───────────────────────────────────────────────────────────
+
+#[derive(Clone, Default)]
+pub struct RadarLayerState {
+    pub elevation_count: u32,
+    pub elevation_total: u32,
+    pub threshold_dbz: f32,
+    pub site_world_pos: Vec3,
+    pub base_dims: BaseTextureDims,
+    pub site_id: Option<String>,
+}
+
+impl RadarLayerState {
+    fn new(threshold_dbz: f32) -> Self {
+        Self { threshold_dbz, ..default() }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct RadarLayerStates(pub HashMap<String, RadarLayerState>);
+
+// ── UiState ───────────────────────────────────────────────────────────────────
+
 #[derive(Serialize, Clone, Default)]
-pub struct UiState {
-    pub radar_loaded: bool,
-    pub active_site: Option<String>,
+pub struct UiRadarLayerState {
+    pub layer_id: String,
+    pub site: Option<String>,
     pub elevation_count: u32,
     pub elevation_total: u32,
     pub threshold_dbz: f32,
 }
 
-/// Tracks how many elevation sweeps to display (current) and how many are loaded (total).
-#[derive(Resource, Default)]
-pub struct ElevationCount {
-    pub current: u32,
-    pub total: u32,
+#[derive(Serialize, Clone, Default)]
+pub struct UiState {
+    pub radar_loaded: bool,
+    // Backwards-compat fields — mirror the primary (first) radar layer.
+    pub active_site: Option<String>,
+    pub elevation_count: u32,
+    pub elevation_total: u32,
+    pub threshold_dbz: f32,
+    pub radar_layers: Vec<UiRadarLayerState>,
 }
 
-/// Minimum dBZ value to render. Fragments below this are discarded in the shader.
-#[derive(Resource)]
-pub struct ThresholdDbz(pub f32);
+impl UiState {
+    fn sync_layers(&mut self, layer_states: &RadarLayerStates) {
+        self.radar_layers = layer_states.0.iter().map(|(id, s)| UiRadarLayerState {
+            layer_id: id.clone(),
+            site: s.site_id.clone(),
+            elevation_count: s.elevation_count,
+            elevation_total: s.elevation_total,
+            threshold_dbz: s.threshold_dbz,
+        }).collect();
+        self.radar_layers.sort_by(|a, b| a.layer_id.cmp(&b.layer_id));
 
-impl Default for ThresholdDbz {
-    fn default() -> Self {
-        Self(10.0)
+        if let Some(primary) = layer_states.0.get("radar-1")
+            .or_else(|| layer_states.0.values().next())
+        {
+            self.active_site = primary.site_id.clone();
+            self.elevation_count = primary.elevation_count;
+            self.elevation_total = primary.elevation_total;
+            self.threshold_dbz = primary.threshold_dbz;
+        }
     }
 }
 
-/// Injected by nexrad-web with a closure that serializes `UiState` and calls the
-/// registered JS callback. nexrad-render has no js-sys / wasm-bindgen dependency.
 #[derive(Resource, Default)]
 pub struct StateNotifier(pub Option<Box<dyn Fn(&UiState) + Send + Sync>>);
 
@@ -120,48 +170,55 @@ impl StateNotifier {
     }
 }
 
-/// Current UI state mirrored from Bevy resources. Updated and pushed to JS on change.
 #[derive(Resource, Default)]
 pub(crate) struct UiStateResource(pub UiState);
 
-/// World-space position of the currently loaded radar site.
-/// Shared between receive_radar_data and other systems so they place
-/// entities at the correct absolute position.
-#[derive(Resource, Default)]
-pub(crate) struct CurrentSiteWorldPos(pub Vec3);
-
-/// Fixed world origin — must match BasemapConfig default so geography aligns.
 const WORLD_ORIGIN_LAT: f64 = 36.0;
 const WORLD_ORIGIN_LNG: f64 = -98.0;
 
-/// Marks entities that are part of the current radar sweep volume.
+// ── Entity components ─────────────────────────────────────────────────────────
+
 #[derive(Component)]
 pub struct RadarElevation;
 
-/// The sorted elevation index of this sweep (0 = lowest tilt).
+#[derive(Component, Clone)]
+pub struct LayerId(pub String);
+
 #[derive(Component)]
 pub struct ElevationIndex(pub u32);
 
-/// Marker for the base (tilt 0) elevation entity, used for fast animation texture swaps.
 #[derive(Component)]
 pub struct BaseElevationMarker;
 
 // ── Animation frame types ──────────────────────────────────────────────────
 
-/// A single animation frame: pre-quantized R8Unorm reflectivity for tilt 0.
 pub struct AnimationFrame {
     pub num_rays: usize,
     pub num_gates: usize,
     pub data: Vec<u8>,
 }
 
-/// Latest animation frame slot from JS. Replaces channel so rapid scrubbing
-/// overwrites with the current frame instead of queuing; Bevy reads once per tick.
-#[derive(Resource)]
-pub struct AnimationFrameSlot(pub Arc<RwLock<Option<AnimationFrame>>>);
+#[derive(Resource, Clone)]
+pub struct AnimationFrameSlots(
+    pub Arc<RwLock<HashMap<String, Arc<RwLock<Option<AnimationFrame>>>>>>,
+);
 
-/// Tracks current base texture dimensions to detect when geometry changes.
-#[derive(Resource, Default)]
+impl Default for AnimationFrameSlots {
+    fn default() -> Self {
+        Self(Arc::new(RwLock::new(HashMap::new())))
+    }
+}
+
+impl AnimationFrameSlots {
+    pub fn slot_for(&self, layer_id: &str) -> Arc<RwLock<Option<AnimationFrame>>> {
+        let mut map = self.0.write().expect("AnimationFrameSlots poisoned");
+        map.entry(layer_id.to_string())
+            .or_insert_with(|| Arc::new(RwLock::new(None)))
+            .clone()
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct BaseTextureDims {
     pub num_rays: usize,
     pub num_gates: usize,
@@ -169,50 +226,40 @@ pub struct BaseTextureDims {
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
-/// Core radar rendering plugin. Add to your `App` before `DefaultPlugins`.
-///
-/// Exposes `RadarVolumeSender` as a resource so each entrypoint (CLI thread,
-/// WASM `spawn_local`) can feed parsed volumes into the scene.
-///
-/// For WASM, insert `ExternalVolumeReceiver(rx)` before adding this plugin;
-/// the plugin will consume it and drain volumes into the scene.
-#[derive(Default)]
 pub struct RadarPlugin;
+
+impl Default for RadarPlugin {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl Plugin for RadarPlugin {
     fn build(&self, app: &mut App) {
-        // Embed WGSL shaders at compile time so they work on WASM without
-        // any filesystem/HTTP asset loading.
         embedded_asset!(app, "rendering/shaders/radar_elevation.wgsl");
 
-        let (radar_tx, radar_rx) = async_channel::unbounded::<RadarVolume>();
+        let (radar_tx, radar_rx) = async_channel::unbounded::<TaggedVolume>();
 
         app.insert_resource(RadarVolumeSender(radar_tx.clone()))
             .insert_resource(RadarDataChannel(radar_rx));
 
         if let Some(ext) = app.world_mut().remove_resource::<ExternalVolumeReceiver>() {
-            app.add_systems(
-                Update,
-                forward_external_volume.before(receive_radar_data),
-            )
-            .insert_resource(ext);
+            app.add_systems(Update, forward_external_volume.before(receive_radar_data))
+               .insert_resource(ext);
         }
 
         if app.world().get_resource::<JsCommandReceiver>().is_some() {
             app.add_systems(Update, drain_js_commands);
         }
 
-        if app.world().get_resource::<AnimationFrameSlot>().is_some() {
-            app.init_resource::<BaseTextureDims>()
-                .add_systems(Update, receive_animation_frame);
+        if app.world().get_resource::<AnimationFrameSlots>().is_some() {
+            app.add_systems(Update, receive_animation_frames);
         }
 
         app.init_resource::<LoadStatus>()
             .init_resource::<StateNotifier>()
             .init_resource::<UiStateResource>()
-            .init_resource::<CurrentSiteWorldPos>()
-            .init_resource::<ElevationCount>()
-            .init_resource::<ThresholdDbz>()
+            .init_resource::<RadarLayerStates>()
             .add_plugins(BasemapPlugin)
             .add_plugins(OrbitCameraPlugin)
             .add_plugins(MaterialPlugin::<RadarMaterial>::default())
@@ -221,7 +268,7 @@ impl Plugin for RadarPlugin {
     }
 }
 
-// ── Startup systems ───────────────────────────────────────────────────────────
+// ── Startup ───────────────────────────────────────────────────────────────────
 
 fn setup_scene_lighting(
     mut commands: Commands,
@@ -236,24 +283,16 @@ fn setup_scene_lighting(
         Transform::default().looking_at(Vec3::new(0.4, -0.8, 0.3), Vec3::Y),
     ));
     global_ambient.brightness = 1000.0;
-
 }
 
-// ── Per-frame systems ─────────────────────────────────────────────────────────
+// ── Systems ───────────────────────────────────────────────────────────────────
 
-/// When using external volume receiver (WASM), drain it and forward to the internal channel.
-fn forward_external_volume(
-    ext: Res<ExternalVolumeReceiver>,
-    sender: Res<RadarVolumeSender>,
-) {
-    while let Ok(volume) = ext.0.try_recv() {
-        let _ = sender.0.try_send(volume);
+fn forward_external_volume(ext: Res<ExternalVolumeReceiver>, sender: Res<RadarVolumeSender>) {
+    while let Ok(tagged) = ext.0.try_recv() {
+        let _ = sender.0.try_send(tagged);
     }
 }
 
-/// Compute (lower_elev, upper_elev) slab bounds for each scan in a sorted
-/// elevation list. Adjacent slabs share the same boundary height so the
-/// full volume is seamlessly contiguous with no gaps.
 fn slab_bounds(scans: &[ElevationScan]) -> Vec<(f32, f32)> {
     let n = scans.len();
     (0..n)
@@ -284,8 +323,8 @@ fn spawn_elevation_entities(
     materials: &mut Assets<RadarMaterial>,
     images: &mut Assets<Image>,
     scans: &[ElevationScan],
-    elev_count: &ElevationCount,
-    threshold: &ThresholdDbz,
+    layer_state: &RadarLayerState,
+    layer_id: &str,
     site_offset: Vec3,
 ) {
     let bounds = slab_bounds(scans);
@@ -294,15 +333,16 @@ fn spawn_elevation_entities(
         let texture = create_reflectivity_texture(images, scan);
         let material = materials.add(RadarMaterial {
             reflectivity_texture: texture,
-            params: Vec4::new(threshold.0, 0.0, 0.0, 0.0),
+            params: Vec4::new(layer_state.threshold_dbz, 0.0, 0.0, 0.0),
         });
-        let visible = (i as u32) < elev_count.current;
+        let visible = (i as u32) < layer_state.elevation_count;
         let mut entity = commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(material),
             Transform::from_translation(site_offset),
             if visible { Visibility::Visible } else { Visibility::Hidden },
             RadarElevation,
+            LayerId(layer_id.to_string()),
             ElevationIndex(i as u32),
         ));
         if i == 0 {
@@ -314,27 +354,25 @@ fn spawn_elevation_entities(
 fn receive_radar_data(
     mut commands: Commands,
     channel: Res<RadarDataChannel>,
-    old_elevations: Query<Entity, With<RadarElevation>>,
+    old_elevations: Query<(Entity, &LayerId), With<RadarElevation>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<RadarMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut status: ResMut<LoadStatus>,
     notifier: Res<StateNotifier>,
     mut ui_state: ResMut<UiStateResource>,
-    mut site_world_pos: ResMut<CurrentSiteWorldPos>,
     mut camera: Query<&mut OrbitCamera>,
-    mut elev_count: ResMut<ElevationCount>,
-    threshold: Res<ThresholdDbz>,
+    mut layer_states: ResMut<RadarLayerStates>,
 ) {
-    let Ok(volume) = channel.0.try_recv() else {
-        return;
-    };
+    let Ok(tagged) = channel.0.try_recv() else { return };
+    let TaggedVolume { layer_id, volume } = tagged;
 
-    for entity in &old_elevations {
-        commands.entity(entity).despawn();
+    for (entity, lid) in &old_elevations {
+        if lid.0 == layer_id {
+            commands.entity(entity).despawn();
+        }
     }
 
-    // Compute absolute world position of this radar site and move camera to it.
     let offset = if let Some(site) = RadarSite::lookup(&volume.site) {
         let (x, _, z) = nexrad_core::geo::wgs84_to_bevy(
             site.lat, site.lng, WORLD_ORIGIN_LAT, WORLD_ORIGIN_LNG,
@@ -343,9 +381,11 @@ fn receive_radar_data(
     } else {
         Vec3::ZERO
     };
-    site_world_pos.0 = offset;
-    if let Ok(mut cam) = camera.single_mut() {
-        cam.focus = offset;
+
+    if layer_id == "radar-1" {
+        if let Ok(mut cam) = camera.single_mut() {
+            cam.focus = offset;
+        }
     }
 
     let mut scans = volume.elevations;
@@ -354,9 +394,15 @@ fn receive_radar_data(
             .partial_cmp(&b.elevation_angle)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    elev_count.total = scans.len() as u32;
-    // Default to showing 1 tilt; user can increase via slider
-    elev_count.current = 1.min(scans.len() as u32);
+
+    let layer_state = layer_states.0
+        .entry(layer_id.clone())
+        .or_insert_with(|| RadarLayerState::new(10.0));
+    layer_state.elevation_total = scans.len() as u32;
+    layer_state.elevation_count = 1.min(scans.len() as u32);
+    layer_state.site_world_pos = offset;
+    layer_state.site_id = Some(volume.site.clone());
+    let layer_state_snapshot = layer_state.clone();
 
     spawn_elevation_entities(
         &mut commands,
@@ -364,61 +410,73 @@ fn receive_radar_data(
         &mut materials,
         &mut images,
         &scans,
-        &elev_count,
-        &threshold,
+        &layer_state_snapshot,
+        &layer_id,
         offset,
     );
 
-    log::info!("loaded {} elevation sweeps from {}", scans.len(), volume.site);
+    log::info!("loaded {} elevation sweeps from {} (layer: {})", scans.len(), volume.site, layer_id);
     status.radar_loaded = true;
     ui_state.0.radar_loaded = true;
-    ui_state.0.active_site = Some(volume.site.clone());
-    ui_state.0.elevation_count = elev_count.current;
-    ui_state.0.elevation_total = elev_count.total;
-    ui_state.0.threshold_dbz = threshold.0;
+    ui_state.0.sync_layers(&layer_states);
     notifier.notify(&ui_state.0);
 }
 
 fn drain_js_commands(
+    mut commands: Commands,
     receiver: Res<JsCommandReceiver>,
     mut camera: Query<&mut OrbitCamera>,
-    mut sweeps: Query<(&mut Visibility, &ElevationIndex), With<RadarElevation>>,
+    elevations: Query<(Entity, &LayerId), With<RadarElevation>>,
+    mut sweeps: Query<(&mut Visibility, &ElevationIndex, &LayerId), With<RadarElevation>>,
     notifier: Res<StateNotifier>,
     mut ui_state: ResMut<UiStateResource>,
-    mut elev_count: ResMut<ElevationCount>,
-    mut threshold: ResMut<ThresholdDbz>,
-    elev_material_handles: Query<&MeshMaterial3d<RadarMaterial>, With<RadarElevation>>,
+    mut layer_states: ResMut<RadarLayerStates>,
+    elev_material_handles: Query<(&MeshMaterial3d<RadarMaterial>, &LayerId), With<RadarElevation>>,
     mut radar_materials: ResMut<Assets<RadarMaterial>>,
     mut camera_mode: ResMut<CameraMode>,
 ) {
     while let Ok(cmd) = receiver.0.try_recv() {
         match cmd {
-            JsCommand::SetElevationCount(count) => {
-                elev_count.current = count.min(elev_count.total);
-                for (mut v, idx) in sweeps.iter_mut() {
-                    *v = if idx.0 < elev_count.current {
-                        Visibility::Visible
-                    } else {
-                        Visibility::Hidden
-                    };
-                }
-                ui_state.0.elevation_count = elev_count.current;
-                ui_state.0.elevation_total = elev_count.total;
-                notifier.notify(&ui_state.0);
-            }
-            JsCommand::SetThreshold(dbz) => {
-                threshold.0 = dbz;
-                for handle in &elev_material_handles {
-                    if let Some(mat) = radar_materials.get_mut(&handle.0) {
-                        mat.params.x = dbz;
+            JsCommand::RemoveLayer { layer_id } => {
+                for (entity, lid) in &elevations {
+                    if lid.0 == layer_id {
+                        commands.entity(entity).despawn();
                     }
                 }
-                ui_state.0.threshold_dbz = dbz;
+                layer_states.0.remove(&layer_id);
+                ui_state.0.sync_layers(&layer_states);
+                notifier.notify(&ui_state.0);
+            }
+            JsCommand::SetElevationCount { layer_id, count } => {
+                if let Some(s) = layer_states.0.get_mut(&layer_id) {
+                    s.elevation_count = count.min(s.elevation_total);
+                    let capped = s.elevation_count;
+                    for (mut v, idx, lid) in sweeps.iter_mut() {
+                        if lid.0 == layer_id {
+                            *v = if idx.0 < capped { Visibility::Visible } else { Visibility::Hidden };
+                        }
+                    }
+                }
+                ui_state.0.sync_layers(&layer_states);
+                notifier.notify(&ui_state.0);
+            }
+            JsCommand::SetThreshold { layer_id, dbz } => {
+                if let Some(s) = layer_states.0.get_mut(&layer_id) {
+                    s.threshold_dbz = dbz;
+                }
+                for (handle, lid) in &elev_material_handles {
+                    if lid.0 == layer_id {
+                        if let Some(mat) = radar_materials.get_mut(&handle.0) {
+                            mat.params.x = dbz;
+                        }
+                    }
+                }
+                ui_state.0.sync_layers(&layer_states);
                 notifier.notify(&ui_state.0);
             }
             JsCommand::ResetCamera => {
                 if let Ok(mut cam) = camera.single_mut() {
-                    let focus = cam.focus; // keep current site focus
+                    let focus = cam.focus;
                     *cam = OrbitCamera::default();
                     cam.focus = focus;
                 }
@@ -430,72 +488,65 @@ fn drain_js_commands(
     }
 }
 
-fn receive_animation_frame(
-    slot: Res<AnimationFrameSlot>,
-    base_query: Query<&MeshMaterial3d<RadarMaterial>, With<BaseElevationMarker>>,
+fn receive_animation_frames(
+    slots: Res<AnimationFrameSlots>,
+    base_query: Query<(&LayerId, &MeshMaterial3d<RadarMaterial>), With<BaseElevationMarker>>,
     mut radar_materials: ResMut<Assets<RadarMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    mut dims: ResMut<BaseTextureDims>,
+    mut layer_states: ResMut<RadarLayerStates>,
 ) {
-    let frame = {
-        let mut g = match slot.0.write() {
-            Ok(g) => g,
-            Err(_) => return,
+    let slots_map = match slots.0.read() {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+
+    for (layer_id, mat_handle) in &base_query {
+        let Some(slot) = slots_map.get(&layer_id.0) else { continue };
+        let frame = {
+            let mut g = match slot.write() { Ok(g) => g, Err(_) => continue };
+            g.take()
         };
-        g.take()
-    };
-    let Some(frame) = frame else {
-        return;
-    };
+        let Some(frame) = frame else { continue };
 
-    let Ok(mat_handle) = base_query.single() else {
-        return;
-    };
+        let Some(mat) = radar_materials.get_mut(&mat_handle.0) else { continue };
+        let tex_handle = &mat.reflectivity_texture;
 
-    let Some(mat) = radar_materials.get_mut(&mat_handle.0) else {
-        return;
-    };
+        let dims = layer_states.0
+            .entry(layer_id.0.clone())
+            .or_insert_with(|| RadarLayerState::new(10.0));
 
-    let tex_handle = &mat.reflectivity_texture;
-
-    if frame.num_rays == dims.num_rays && frame.num_gates == dims.num_gates {
-        // Fast path: overwrite image data in-place (GPU re-upload next frame)
-        if let Some(image) = images.get_mut(tex_handle) {
-            image.data = Some(frame.data);
+        if frame.num_rays == dims.base_dims.num_rays && frame.num_gates == dims.base_dims.num_gates {
+            if let Some(image) = images.get_mut(tex_handle) {
+                image.data = Some(frame.data);
+            }
+        } else {
+            use bevy::{
+                asset::RenderAssetUsages,
+                image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
+                render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+            };
+            let mut image = Image::new(
+                Extent3d {
+                    width: frame.num_gates as u32,
+                    height: frame.num_rays as u32,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                frame.data,
+                TextureFormat::R8Unorm,
+                RenderAssetUsages::RENDER_WORLD,
+            );
+            image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+                mag_filter: ImageFilterMode::Nearest,
+                min_filter: ImageFilterMode::Nearest,
+                ..default()
+            });
+            let new_handle = images.add(image);
+            if let Some(mat) = radar_materials.get_mut(&mat_handle.0) {
+                mat.reflectivity_texture = new_handle;
+            }
+            dims.base_dims.num_rays = frame.num_rays;
+            dims.base_dims.num_gates = frame.num_gates;
         }
-    } else {
-        // Slow path: dimensions changed, create a new Image
-        use bevy::{
-            asset::RenderAssetUsages,
-            image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
-            render::render_resource::{Extent3d, TextureDimension, TextureFormat},
-        };
-
-        let mut image = Image::new(
-            Extent3d {
-                width: frame.num_gates as u32,
-                height: frame.num_rays as u32,
-                depth_or_array_layers: 1,
-            },
-            TextureDimension::D2,
-            frame.data,
-            TextureFormat::R8Unorm,
-            RenderAssetUsages::RENDER_WORLD,
-        );
-        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-            mag_filter: ImageFilterMode::Nearest,
-            min_filter: ImageFilterMode::Nearest,
-            ..default()
-        });
-
-        let new_handle = images.add(image);
-        // Update material to point to new texture
-        if let Some(mat) = radar_materials.get_mut(&mat_handle.0) {
-            mat.reflectivity_texture = new_handle;
-        }
-
-        dims.num_rays = frame.num_rays;
-        dims.num_gates = frame.num_gates;
     }
 }
-

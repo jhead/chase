@@ -1,7 +1,7 @@
 import styled from "@emotion/styled";
 import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
-import type { AnimationState } from "../../hooks/useRadarAnimation";
+import type { AnimationState } from "../../hooks/useMultiLayerAnimation";
 
 interface TopBarProps {
   onSiteClick: () => void;

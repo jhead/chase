@@ -3,14 +3,8 @@ import { useState } from "react";
 import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
 
-type PaneLayout = "single" | "split-h" | "split-v" | "quad";
 type CameraMode = "2d" | "3d";
 
-const PANE_LAYOUTS: { layout: PaneLayout; label: string; title: string; stub: boolean }[] = [
-  { layout: "single",  label: "□", title: "Single pane",     stub: false },
-  { layout: "split-h", label: "▣", title: "Split horizontal", stub: true },
-  { layout: "quad",    label: "⊞", title: "4-pane quad",     stub: true },
-];
 
 const CAMERA_MODES: { mode: CameraMode; label: string; title: string }[] = [
   { mode: "2d", label: "2D", title: "2D mode — left drag: pan, right drag: tilt" },
@@ -35,20 +29,6 @@ export function CanvasButtons() {
             title={title}
             active={cameraMode === mode}
             onClick={() => setCamMode(mode)}
-          >
-            {label}
-          </IconButton>
-        ))}
-      </ButtonGroup>
-      <ButtonGroup>
-        {PANE_LAYOUTS.map(({ layout, label, title, stub }) => (
-          <IconButton
-            key={layout}
-            title={stub ? `${title} (coming soon)` : title}
-            active={layout === "single"}
-            disabled={stub}
-            onClick={stub ? undefined : undefined}
-            style={{ opacity: stub ? 0.35 : 1 }}
           >
             {label}
           </IconButton>

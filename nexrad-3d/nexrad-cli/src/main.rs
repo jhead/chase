@@ -9,7 +9,7 @@ use clap::Parser;
 use nexrad_core::sites::RadarSite;
 use nexrad_render::{
     camera::orbit_camera::OrbitCamera,
-    BasemapConfig, LoadStatus, RadarPlugin, RadarVolumeSender,
+    BasemapConfig, LoadStatus, RadarPlugin, RadarVolumeSender, TaggedVolume,
 };
 
 #[derive(Parser, Resource, Debug, Clone)]
@@ -24,8 +24,6 @@ struct CliArgs {
     output: Option<String>,
 }
 
-/// Identifies which 2×2 quadrant a camera occupies (0=TL, 1=TR, 2=BL, 3=BR).
-/// A system reads the physical window size each frame and sets the viewport accordingly.
 #[derive(Component)]
 struct QuadrantCamera(usize);
 
@@ -40,7 +38,6 @@ fn main() {
     let args = CliArgs::parse();
     let is_headless = args.output.is_some();
 
-    // Set the basemap origin to the selected radar site's coordinates.
     let basemap_config = RadarSite::lookup(&args.site)
         .map(|site| BasemapConfig {
             origin_lat: site.lat,
@@ -59,20 +56,15 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(RadarPlugin)
+        .add_plugins(RadarPlugin::default())
         .insert_resource(basemap_config)
         .insert_resource(args)
         .init_resource::<ScreenshotState>()
         .add_systems(Startup, (setup_cameras, start_radar_fetch))
-        .add_systems(
-            Update,
-            (update_quadrant_viewports, screenshot_and_exit),
-        )
+        .add_systems(Update, (update_quadrant_viewports, screenshot_and_exit))
         .run();
 }
 
-/// In screenshot mode, replace the plugin's single camera with four quadrant cameras.
-/// In normal mode, OrbitCameraPlugin::spawn_camera already handles it.
 fn setup_cameras(
     mut commands: Commands,
     args: Res<CliArgs>,
@@ -82,7 +74,6 @@ fn setup_cameras(
         return;
     }
 
-    // Despawn the plugin's default camera before adding quadrant cameras.
     for entity in &existing {
         commands.entity(entity).despawn();
     }
@@ -105,8 +96,6 @@ fn setup_cameras(
     }
 }
 
-/// Each frame, recompute every QuadrantCamera's viewport from the actual
-/// physical window size so the split is correct on HiDPI / Retina displays.
 fn update_quadrant_viewports(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut cameras: Query<(&QuadrantCamera, &mut Camera)>,
@@ -114,9 +103,7 @@ fn update_quadrant_viewports(
     let Ok(window) = windows.single() else { return };
     let phys_w = window.physical_width();
     let phys_h = window.physical_height();
-    if phys_w == 0 || phys_h == 0 {
-        return;
-    }
+    if phys_w == 0 || phys_h == 0 { return; }
     let half_w = phys_w / 2;
     let half_h = phys_h / 2;
     for (quadrant, mut camera) in &mut cameras {
@@ -134,9 +121,6 @@ fn update_quadrant_viewports(
     }
 }
 
-/// Spawn a background thread that runs a tokio runtime, fetches the latest
-/// radar volume via the CF Worker proxy, parses it, and delivers the result
-/// via `RadarVolumeSender` (provided by `RadarPlugin`).
 fn start_radar_fetch(sender: Res<RadarVolumeSender>, args: Res<CliArgs>) {
     let tx = sender.0.clone();
     let site = args.site.clone();
@@ -150,7 +134,8 @@ fn start_radar_fetch(sender: Res<RadarVolumeSender>, args: Res<CliArgs>) {
         rt.block_on(async move {
             match nexrad_fetch::fetch_latest_volume(&site).await {
                 Ok(volume) => {
-                    let _ = tx.try_send(volume);
+                    let tagged = TaggedVolume { layer_id: "radar-1".to_string(), volume };
+                    let _ = tx.try_send(tagged);
                 }
                 Err(e) => warn!("radar fetch failed: {e}"),
             }
@@ -166,13 +151,9 @@ fn screenshot_and_exit(
     mut app_exit: MessageWriter<AppExit>,
     main_window: Query<Entity, With<PrimaryWindow>>,
 ) {
-    let Some(output_path) = args.output.clone() else {
-        return;
-    };
+    let Some(output_path) = args.output.clone() else { return };
 
-    if state.exit_requested {
-        return;
-    }
+    if state.exit_requested { return; }
 
     if state.taken {
         state.frames_since_ready += 1;

@@ -4,33 +4,46 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 
 export interface NexradWasm {
   add_scan: (
+    layer_id: string,
     elevation_angle_deg: number,
     gate_size_m: number,
     first_gate_m: number,
     azimuths: Float32Array,
     reflectivity: Float32Array
   ) => void;
-  commit_volume: (site_id: string) => void;
+  commit_volume: (layer_id: string, site_id: string) => void;
   send_command: (json: string) => void;
   set_state_callback: (cb: (stateJson: string) => void) => void;
-  update_base_texture: (num_rays: number, num_gates: number, data: Uint8Array) => void;
+  update_layer_texture: (layer_id: string, num_rays: number, num_gates: number, data: Uint8Array) => void;
 }
 
 /** Discriminated union of all commands JS can send to the Bevy renderer. */
 export type JsCommand =
   | { type: "ResetCamera" }
-  | { type: "SetElevationCount"; count: number }
-  | { type: "SetThreshold"; dbz: number }
-  | { type: "SetPaneLayout"; layout: "single" | "split-h" | "split-v" | "quad" }
+  | { type: "RemoveLayer"; layer_id: string }
+  | { type: "SetElevationCount"; layer_id: string; count: number }
+  | { type: "SetThreshold"; layer_id: string; dbz: number }
   | { type: "SetCameraMode"; mode: "2d" | "3d" };
+
+/** Per-layer state snapshot pushed from Bevy. */
+export interface UiRadarLayerState {
+  layer_id: string;
+  site: string | null;
+  elevation_count: number;
+  elevation_total: number;
+  threshold_dbz: number;
+}
 
 /** Serializable state pushed from Bevy to React on meaningful changes. */
 export interface UiState {
   radar_loaded: boolean;
+  // Backwards-compat: mirrors primary layer (radar-1)
   active_site: string | null;
   elevation_count: number;
   elevation_total: number;
   threshold_dbz: number;
+  // Per-layer state
+  radar_layers: UiRadarLayerState[];
 }
 
 const DEFAULT_UI_STATE: UiState = {
@@ -39,6 +52,7 @@ const DEFAULT_UI_STATE: UiState = {
   elevation_count: 0,
   elevation_total: 0,
   threshold_dbz: 10,
+  radar_layers: [],
 };
 
 // ── WASM singleton ────────────────────────────────────────────────────────────

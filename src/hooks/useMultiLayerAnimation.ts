@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useWasm } from "../ctx/WasmContext";
+import type { RadarLayer } from "./useLayers";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/** Global animation state shared across all radar layers. */
 export interface AnimationState {
   playing: boolean;
   frameIndex: number;
   frameCount: number;
-  speed: number; // multiplier: 0.5, 1, 2, 4 (1x = 5fps = 200ms/frame)
+  speed: number;
   timestamps: string[];
+  /** Loaded frames from the PRIMARY layer (drives the scrub bar). */
   loadedFrames: Set<number>;
-  ready: boolean; // true when frame list loaded and >=1 frame cached
+  ready: boolean;
   loop: boolean;
 }
 
@@ -18,6 +21,16 @@ interface CachedFrame {
   data: Uint8Array;
   numRays: number;
   numGates: number;
+}
+
+interface LayerData {
+  siteId: string;
+  pool: Worker[];
+  frameCache: Map<number, CachedFrame>;
+  loadedFrames: Set<number>;
+  initialLoaded: boolean;
+  /** Current frame index for this layer (advances independently during playback). */
+  currentFrameIndex: number;
 }
 
 const NEXRAD_API =
@@ -30,8 +43,6 @@ const POOL_SIZE = Math.min(navigator.hardwareConcurrency || 4, 8);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Given the set of loaded frame indices, find the next loaded index after `current`.
- *  If `loop` is true and we pass the max, wrap to the smallest loaded index. */
 function nextLoadedIndex(loaded: Set<number>, current: number, frameCount: number, loop: boolean): number | null {
   for (let i = current + 1; i < frameCount; i++) {
     if (loaded.has(i)) return i;
@@ -56,15 +67,40 @@ function prevLoadedIndex(loaded: Set<number>, current: number, frameCount: numbe
   return null;
 }
 
+function createWorkerPool(onMessage: (e: MessageEvent, layerId: string) => void, layerId: string): Worker[] {
+  const pool: Worker[] = [];
+  for (let i = 0; i < POOL_SIZE; i++) {
+    const w = new Worker(
+      new URL("../workers/radarFrameWorker.ts", import.meta.url),
+      { type: "module" }
+    );
+    w.onmessage = (e) => onMessage(e, layerId);
+    pool.push(w);
+  }
+  return pool;
+}
+
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
-export function useRadarAnimation() {
+/**
+ * Multi-layer radar animation hook.
+ *
+ * Manages one frame cache + worker pool per radar layer while keeping a single
+ * global AnimationState (speed, loop, frameIndex, frameCount).
+ * On each tick, ALL active layers are advanced simultaneously.
+ */
+export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
   const { wasm } = useWasm();
-  const poolRef = useRef<Worker[]>([]);
+  const wasmRef = useRef(wasm);
+  wasmRef.current = wasm;
+
+  // Per-layer data managed imperatively (no re-render on cache hits)
+  const layerDataRef = useRef(new Map<string, LayerData>());
+
+  // Primary layer: the first enabled radar layer, used for frameCount/timestamps/loadedFrames
+  const primaryIdRef = useRef<string | null>(null);
+
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const siteIdRef = useRef<string | null>(null);
-  const initialLoadedRef = useRef(false);
-  const frameCacheRef = useRef(new Map<number, CachedFrame>());
 
   const [state, setState] = useState<AnimationState>({
     playing: false,
@@ -77,104 +113,133 @@ export function useRadarAnimation() {
     loop: true,
   });
 
-  // Refs that mirror state for use in timer callbacks (avoids stale closures)
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  const wasmRef = useRef(wasm);
-  wasmRef.current = wasm;
-
-  // ── Worker pool lifecycle ─────────────────────────────────────────────────
-
-  function createPool(): Worker[] {
-    const pool: Worker[] = [];
-    for (let i = 0; i < POOL_SIZE; i++) {
-      const w = new Worker(
-        new URL("../workers/radarFrameWorker.ts", import.meta.url),
-        { type: "module" }
-      );
-      w.onmessage = handleWorkerMessage;
-      pool.push(w);
-    }
-    return pool;
-  }
-
-  function terminatePool() {
-    for (const w of poolRef.current) w.terminate();
-    poolRef.current = [];
-  }
+  // ── Cleanup on unmount ──────────────────────────────────────────────────────
 
   useEffect(() => {
     return () => {
       stopTimer();
-      terminatePool();
+      for (const data of layerDataRef.current.values()) {
+        data.pool.forEach((w) => w.terminate());
+      }
+      layerDataRef.current.clear();
     };
   }, []);
 
+  // Teardown layers that have been removed
+  useEffect(() => {
+    const activeIds = new Set(radarLayers.map((l) => l.id));
+    for (const [id, data] of layerDataRef.current.entries()) {
+      if (!activeIds.has(id)) {
+        data.pool.forEach((w) => w.terminate());
+        layerDataRef.current.delete(id);
+      }
+    }
+  }, [radarLayers]);
+
   // ── Worker message handler ────────────────────────────────────────────────
 
-  function handleWorkerMessage(e: MessageEvent) {
+  function handleWorkerMessage(e: MessageEvent, layerId: string) {
     const msg = e.data;
+    const layerData = layerDataRef.current.get(layerId);
+    if (!layerData) return;
+
     switch (msg.type) {
       case "frame": {
         const w = wasmRef.current;
-        if (w && msg.sweep) {
-          // Initial frame — create Bevy mesh entity via add_scan/commit_volume
+        if (w && msg.sweep && !layerData.initialLoaded) {
+          // Initial load: push sweep geometry into Bevy
           const s = msg.sweep;
           w.add_scan(
+            layerId,
             s.elevation_angle,
             s.gate_size_m,
             s.first_gate_m,
             new Float32Array(s.azimuths),
             new Float32Array(s.reflectivity)
           );
-          w.commit_volume(siteIdRef.current ?? "");
-          initialLoadedRef.current = true;
+          w.commit_volume(layerId, layerData.siteId);
+          layerData.initialLoaded = true;
         }
-        // Store in local cache (data was transferred via Transferable, no copy needed)
-        frameCacheRef.current.set(msg.frameIndex, {
+        layerData.frameCache.set(msg.frameIndex, {
           data: msg.data,
           numRays: msg.numRays,
           numGates: msg.numGates,
         });
-        setState((s) => {
-          const loaded = new Set(s.loadedFrames);
-          loaded.add(msg.frameIndex);
-          return { ...s, loadedFrames: loaded };
-        });
+        layerData.loadedFrames.add(msg.frameIndex);
+
+        // If this is the primary layer, update global loadedFrames
+        if (layerId === primaryIdRef.current) {
+          setState((s) => {
+            const loaded = new Set(s.loadedFrames);
+            loaded.add(msg.frameIndex);
+            return { ...s, loadedFrames: loaded, ready: true };
+          });
+        }
         break;
       }
       case "prefetched": {
-        // Store in local cache
-        frameCacheRef.current.set(msg.frameIndex, {
+        layerData.frameCache.set(msg.frameIndex, {
           data: msg.data,
           numRays: msg.numRays,
           numGates: msg.numGates,
         });
-        setState((s) => {
-          const loaded = new Set(s.loadedFrames);
-          loaded.add(msg.frameIndex);
-          return { ...s, loadedFrames: loaded };
-        });
+        layerData.loadedFrames.add(msg.frameIndex);
+
+        if (layerId === primaryIdRef.current) {
+          setState((s) => {
+            const loaded = new Set(s.loadedFrames);
+            loaded.add(msg.frameIndex);
+            return { ...s, loadedFrames: loaded };
+          });
+        }
         break;
       }
       case "error": {
-        console.error("[radarFrameWorker]", msg.message);
+        console.error(`[radarFrameWorker][${layerId}]`, msg.message);
         break;
       }
     }
   }
 
-  // ── Apply frame to WASM (local cache, no worker round-trip) ───────────────
+  // ── Apply frame to all layers ─────────────────────────────────────────────
 
-  function applyFrame(frameIndex: number) {
-    const cached = frameCacheRef.current.get(frameIndex);
-    if (cached && wasmRef.current && initialLoadedRef.current) {
-      wasmRef.current.update_base_texture(cached.numRays, cached.numGates, cached.data);
+  /**
+   * Apply a frame to the primary layer at `primaryFrameIndex`.
+   * Non-primary layers advance independently through their own loaded frames.
+   */
+  function applyFrame(primaryFrameIndex: number) {
+    const w = wasmRef.current;
+    if (!w) return;
+    const s = stateRef.current;
+    for (const [layerId, data] of layerDataRef.current.entries()) {
+      if (!data.initialLoaded) continue;
+      if (layerId === primaryIdRef.current) {
+        const cached = data.frameCache.get(primaryFrameIndex);
+        if (cached) {
+          w.update_layer_texture(layerId, cached.numRays, cached.numGates, cached.data);
+          data.currentFrameIndex = primaryFrameIndex;
+        }
+      } else {
+        // Advance this layer to its own next loaded frame
+        const next = nextLoadedIndex(
+          data.loadedFrames, data.currentFrameIndex,
+          Math.max(0, ...data.loadedFrames) + 1, s.loop
+        );
+        if (next !== null) {
+          const cached = data.frameCache.get(next);
+          if (cached) {
+            w.update_layer_texture(layerId, cached.numRays, cached.numGates, cached.data);
+            data.currentFrameIndex = next;
+          }
+        }
+      }
     }
   }
 
-  // ── Timer management ──────────────────────────────────────────────────────
+  // ── Timer ────────────────────────────────────────────────────────────────
 
   function stopTimer() {
     if (timerRef.current !== null) {
@@ -197,7 +262,6 @@ export function useRadarAnimation() {
         return;
       }
 
-      // Use local cache directly — no worker round-trip
       applyFrame(next);
       setState((prev) => ({ ...prev, frameIndex: next }));
     }, intervalMs);
@@ -210,8 +274,6 @@ export function useRadarAnimation() {
       if (s.frameCount === 0 || s.loadedFrames.size < 2) return s;
 
       let startIdx = s.frameIndex;
-
-      // If at the end of loaded frames, restart from the first loaded frame
       const next = nextLoadedIndex(s.loadedFrames, s.frameIndex, s.frameCount, false);
       if (next === null) {
         const sorted = [...s.loadedFrames].sort((a, b) => a - b);
@@ -230,11 +292,8 @@ export function useRadarAnimation() {
   }, []);
 
   const togglePlay = useCallback(() => {
-    if (stateRef.current.playing) {
-      pause();
-    } else {
-      play();
-    }
+    if (stateRef.current.playing) pause();
+    else play();
   }, [play, pause]);
 
   const nextFrame = useCallback(() => {
@@ -273,9 +332,7 @@ export function useRadarAnimation() {
 
   const setSpeed = useCallback((speed: number) => {
     setState((s) => {
-      if (s.playing) {
-        startTimer(speed);
-      }
+      if (s.playing) startTimer(speed);
       return { ...s, speed };
     });
   }, []);
@@ -284,9 +341,7 @@ export function useRadarAnimation() {
     setState((s) => {
       const currentIdx = SPEED_OPTIONS.indexOf(s.speed);
       const nextSpeed = SPEED_OPTIONS[(currentIdx + 1) % SPEED_OPTIONS.length];
-      if (s.playing) {
-        startTimer(nextSpeed);
-      }
+      if (s.playing) startTimer(nextSpeed);
       return { ...s, speed: nextSpeed };
     });
   }, []);
@@ -299,23 +354,44 @@ export function useRadarAnimation() {
     setState((s) => ({ ...s, loop: !s.loop }));
   }, []);
 
-  const init = useCallback((siteId: string) => {
-    // Terminate old workers to prevent stale data from a previous site
-    terminatePool();
+  /**
+   * Initialize or re-initialize a layer with a new site.
+   * Called when the user selects a site in the sidebar.
+   */
+  const initLayer = useCallback((layerId: string, siteId: string) => {
+    // Teardown existing data for this layer
+    const existing = layerDataRef.current.get(layerId);
+    if (existing) {
+      existing.pool.forEach((w) => w.terminate());
+    }
+
+    const isPrimary = layerDataRef.current.size === 0 || layerId === primaryIdRef.current || primaryIdRef.current === null;
+    if (isPrimary) primaryIdRef.current = layerId;
+
     stopTimer();
 
-    siteIdRef.current = siteId;
-    initialLoadedRef.current = false;
-    frameCacheRef.current.clear();
-    setState((s) => ({
-      ...s,
-      playing: false,
-      frameIndex: 0,
-      frameCount: 0,
-      timestamps: [],
+    const layerData: LayerData = {
+      siteId,
+      pool: [],
+      frameCache: new Map(),
       loadedFrames: new Set(),
-      ready: false,
-    }));
+      initialLoaded: false,
+      currentFrameIndex: 0,
+    };
+    layerDataRef.current.set(layerId, layerData);
+
+    // Reset global state if this is the primary layer
+    if (isPrimary) {
+      setState((s) => ({
+        ...s,
+        playing: false,
+        frameIndex: 0,
+        frameCount: 0,
+        timestamps: [],
+        loadedFrames: new Set(),
+        ready: false,
+      }));
+    }
 
     const d = new Date();
     const y = d.getFullYear();
@@ -323,41 +399,43 @@ export function useRadarAnimation() {
     const day = String(d.getDate()).padStart(2, "0");
     const date = `${y}/${m}/${day}`;
 
-    // Fetch frame list on main thread, then distribute parsing across worker pool
     fetch(`${NEXRAD_API}?frames=1&date=${encodeURIComponent(date)}&radar=${encodeURIComponent(siteId)}`)
       .then((res) => {
         if (!res.ok) throw new Error(`Frame list fetch failed: ${res.status}`);
         return res.json() as Promise<{ files: string[]; timestamps: string[]; count: number }>;
       })
       .then((data) => {
-        if (siteIdRef.current !== siteId) return; // site changed, discard
+        // Guard: if this layer was re-initialized before response arrived, discard
+        const current = layerDataRef.current.get(layerId);
+        if (!current || current.siteId !== siteId) return;
 
         const { files, timestamps, count } = data;
         const latestIdx = count > 0 ? count - 1 : 0;
 
-        setState((s) => ({
-          ...s,
-          frameCount: count,
-          timestamps,
-          ready: count > 0,
-          frameIndex: latestIdx,
-        }));
+        // Set the layer's initial frame position to the latest frame
+        current.currentFrameIndex = latestIdx;
+
+        if (isPrimary) {
+          setState((s) => ({
+            ...s,
+            frameCount: count,
+            timestamps,
+            ready: count > 0,
+            frameIndex: latestIdx,
+          }));
+        }
 
         if (count === 0) return;
 
-        // Create fresh worker pool
-        const pool = createPool();
-        poolRef.current = pool;
+        const pool = createWorkerPool(handleWorkerMessage, layerId);
+        current.pool = pool;
 
-        // Send file list to all workers
         for (const w of pool) {
           w.postMessage({ type: "setFiles", files, baseUrl: NEXRAD_API });
         }
 
-        // Fetch initial frame with sweep metadata (worker[0])
         pool[0].postMessage({ type: "fetch", frameIndex: latestIdx, initial: true });
 
-        // Distribute remaining prefetch indices across the pool (round-robin)
         const prefetchStart = Math.max(0, count - INITIAL_FRAME_BUDGET);
         const indices: number[] = [];
         for (let i = prefetchStart; i < count; i++) {
@@ -374,7 +452,7 @@ export function useRadarAnimation() {
         }
       })
       .catch((err) => {
-        console.error("[useRadarAnimation] Init failed:", err);
+        console.error(`[useMultiLayerAnimation] initLayer(${layerId}) failed:`, err);
       });
   }, []);
 
@@ -390,6 +468,6 @@ export function useRadarAnimation() {
     cycleSpeed,
     setLoop,
     toggleLoop,
-    init,
+    initLayer,
   };
 }
