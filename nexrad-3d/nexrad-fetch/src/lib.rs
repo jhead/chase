@@ -2,8 +2,7 @@ use chrono::{Datelike, Utc};
 use nexrad_core::{parser, types::RadarVolume};
 use reqwest::Client;
 
-const PROXY_BASE: &str = "https://nexrad.justindhead.workers.dev";
-const BUCKET: &str = "unidata-nexrad-level2";
+const S3_BASE: &str = "https://unidata-nexrad-level2.s3.amazonaws.com";
 
 /// Returns `"YYYY/MM/DD"` for today in UTC — used as the S3 path prefix.
 pub fn today_date_path() -> String {
@@ -16,7 +15,7 @@ pub fn today_date_path() -> String {
 pub async fn list_radar_files(site: &str, date: &str) -> Result<Vec<String>, String> {
     let client = Client::new();
     let url = format!(
-        "{PROXY_BASE}/s3/{BUCKET}/?list-type=2&prefix={date}/{site}&max-keys=1000"
+        "{S3_BASE}/?list-type=2&prefix={date}/{site}&max-keys=1000"
     );
 
     let xml = client
@@ -50,7 +49,7 @@ pub async fn list_radar_files(site: &str, date: &str) -> Result<Vec<String>, Str
 /// Download a single NEXRAD Level II archive file by its S3 key.
 pub async fn fetch_radar_file(key: &str) -> Result<Vec<u8>, String> {
     let client = Client::new();
-    let url = format!("{PROXY_BASE}/s3/{BUCKET}/{key}");
+    let url = format!("{S3_BASE}/{key}");
 
     let bytes = client
         .get(&url)

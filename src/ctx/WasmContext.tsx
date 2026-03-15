@@ -17,6 +17,12 @@ export interface NexradWasm {
   set_alert_click_callback: (cb: (alertId: string) => void) => void;
   set_site_click_callback: (cb: (siteId: string) => void) => void;
   update_layer_texture: (layer_id: string, num_rays: number, num_gates: number, data: Uint8Array) => void;
+  // Direct S3 fetch/parse
+  list_radar_frames: (site: string, date: string) => Promise<string>;
+  load_frame: (layer_id: string, key: string) => Promise<void>;
+  load_initial_frame: (layer_id: string, key: string, site_id: string) => Promise<void>;
+  apply_frame: (layer_id: string, key: string) => void;
+  clear_frame_cache: (layer_id: string) => void;
 }
 
 /** Per-layer state snapshot pushed from Bevy. */

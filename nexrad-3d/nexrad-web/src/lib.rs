@@ -6,6 +6,7 @@ use std::{
     sync::{OnceLock, RwLock},
 };
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::future_to_promise;
 
 // Engine
 use nexrad_render::{
@@ -271,5 +272,170 @@ pub fn update_layer_texture(layer_id: &str, num_rays: u32, num_gates: u32, data:
                 data: data.to_vec(),
             });
         }
+    }
+}
+
+// ── Direct S3 fetch/parse exports ────────────────────────────────────────────
+
+/// Per-layer frame store: layer_id → (key → AnimationFrame).
+/// Frames are stored here by `load_frame`/`load_initial_frame` and read by `apply_frame`.
+static FRAME_CACHE: OnceLock<RwLock<HashMap<String, HashMap<String, AnimationFrame>>>> = OnceLock::new();
+
+fn frame_cache() -> &'static RwLock<HashMap<String, HashMap<String, AnimationFrame>>> {
+    FRAME_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn store_frame(layer_id: &str, key: &str, frame: AnimationFrame) {
+    if let Ok(mut cache) = frame_cache().write() {
+        cache
+            .entry(layer_id.to_string())
+            .or_default()
+            .insert(key.to_string(), frame);
+    }
+}
+
+fn apply_frame_from_cache(layer_id: &str, key: &str) {
+    let frame = frame_cache()
+        .read()
+        .ok()
+        .and_then(|c| c.get(layer_id)?.get(key).cloned());
+
+    if let (Some(slots), Some(frame)) = (ANIM_SLOTS.get(), frame) {
+        let slot = slots.slot_for(layer_id);
+        if let Ok(mut g) = slot.write() {
+            *g = Some(frame);
+        }
+    }
+}
+
+fn elevation_to_frame(elev: &nexrad_core::types::ElevationScan) -> AnimationFrame {
+    let data: Vec<u8> = elev
+        .reflectivity
+        .iter()
+        .map(|&v| (v * 255.0).round() as u8)
+        .collect();
+    AnimationFrame {
+        num_rays: elev.num_rays,
+        num_gates: elev.num_gates,
+        data,
+    }
+}
+
+/// List available radar frames for `site` on `date` ("YYYY/MM/DD").
+/// Returns a JSON string: `{ files: string[], timestamps: string[], count: number }`.
+#[wasm_bindgen]
+pub fn list_radar_frames(site: String, date: String) -> js_sys::Promise {
+    future_to_promise(async move {
+        let mut files = nexrad_fetch::list_radar_files(&site, &date)
+            .await
+            .map_err(|e| JsValue::from_str(&e))?;
+
+        // list_radar_files returns newest-first; reverse to ascending for animation
+        files.reverse();
+
+        let timestamps: Vec<String> = files
+            .iter()
+            .map(|f| {
+                // S3 key format: YYYY/MM/DD/SITE/SITE_YYYYMMDD_HHMMSS_V06
+                // Extract the HHMMSS part from the filename component
+                let filename = f.rsplit('/').next().unwrap_or(f.as_str());
+                let parts: Vec<&str> = filename.split('_').collect();
+                if parts.len() >= 3 {
+                    let t = parts[2]; // HHMMSS
+                    if t.len() >= 4 {
+                        return format!("{}:{}Z", &t[..2], &t[2..4]);
+                    }
+                }
+                String::new()
+            })
+            .collect();
+
+        let count = files.len();
+        let json = serde_json::json!({ "files": files, "timestamps": timestamps, "count": count });
+        Ok(JsValue::from_str(&json.to_string()))
+    })
+}
+
+/// Fetch and parse one animation frame for `layer_id`, storing it in the internal
+/// frame cache. Call `apply_frame` to display it. JS tracks which frames are ready.
+#[wasm_bindgen]
+pub fn load_frame(layer_id: String, key: String) -> js_sys::Promise {
+    future_to_promise(async move {
+        let bytes = nexrad_fetch::fetch_radar_file(&key)
+            .await
+            .map_err(|e| JsValue::from_str(&e))?;
+
+        let volume = nexrad_core::parser::parse_volume(&key, bytes)
+            .map_err(|e| JsValue::from_str(&e))?;
+
+        if volume.elevations.is_empty() {
+            return Err(JsValue::from_str("no elevation scans in volume"));
+        }
+
+        let frame = elevation_to_frame(&volume.elevations[0]);
+        store_frame(&layer_id, &key, frame);
+
+        Ok(JsValue::UNDEFINED)
+    })
+}
+
+/// Fetch, parse, and apply the initial radar frame for `layer_id`.
+/// Stores the frame in cache, writes to the animation slot, and sends the
+/// RadarVolume to the renderer to create the 3D mesh.
+#[wasm_bindgen]
+pub fn load_initial_frame(layer_id: String, key: String, site_id: String) -> js_sys::Promise {
+    future_to_promise(async move {
+        let bytes = nexrad_fetch::fetch_radar_file(&key)
+            .await
+            .map_err(|e| JsValue::from_str(&e))?;
+
+        let mut volume = nexrad_core::parser::parse_volume(&site_id, bytes)
+            .map_err(|e| JsValue::from_str(&e))?;
+
+        if volume.elevations.is_empty() {
+            return Err(JsValue::from_str("no elevation scans in volume"));
+        }
+
+        let elev = volume.elevations.remove(0);
+        let frame = elevation_to_frame(&elev);
+
+        // Store in cache and apply immediately
+        store_frame(&layer_id, &key, frame.clone());
+        if let Some(slots) = ANIM_SLOTS.get() {
+            let slot = slots.slot_for(&layer_id);
+            if let Ok(mut g) = slot.write() {
+                *g = Some(frame);
+            }
+        }
+
+        // Send volume to renderer (creates 3D mesh)
+        let radar_volume = RadarVolume {
+            site: site_id.clone(),
+            elevations: vec![elev],
+        };
+        let tagged = TaggedVolume {
+            layer_id: layer_id.clone(),
+            volume: radar_volume,
+        };
+        if let Some(tx) = VOLUME_TX.get() {
+            let _ = tx.try_send(tagged);
+        }
+
+        Ok(JsValue::UNDEFINED)
+    })
+}
+
+/// Apply a previously loaded frame (by S3 key) to the animation slot for `layer_id`.
+/// Must be called after `load_frame` or `load_initial_frame` has resolved for this key.
+#[wasm_bindgen]
+pub fn apply_frame(layer_id: &str, key: &str) {
+    apply_frame_from_cache(layer_id, key);
+}
+
+/// Remove all cached frames for `layer_id` (call when tearing down a layer).
+#[wasm_bindgen]
+pub fn clear_frame_cache(layer_id: &str) {
+    if let Ok(mut cache) = frame_cache().write() {
+        cache.remove(layer_id);
     }
 }

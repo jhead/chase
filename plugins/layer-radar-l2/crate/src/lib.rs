@@ -76,6 +76,7 @@ pub struct BaseElevationMarker;
 
 // ── Animation frame types ──────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub struct AnimationFrame {
     pub num_rays: usize,
     pub num_gates: usize,

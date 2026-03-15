@@ -22,29 +22,17 @@ export interface AnimationState {
   loop: boolean;
 }
 
-interface CachedFrame {
-  data: Uint8Array;
-  numRays: number;
-  numGates: number;
-}
-
 interface LayerData {
   siteId: string;
-  pool: Worker[];
-  frameCache: Map<number, CachedFrame>;
+  files: string[];
   loadedFrames: Set<number>;
   initialLoaded: boolean;
   /** Current frame index for this layer (advances independently during playback). */
   currentFrameIndex: number;
 }
 
-const NEXRAD_API =
-  (import.meta as { env?: { VITE_NEXRAD_API_URL?: string } }).env?.VITE_NEXRAD_API_URL ??
-  "http://localhost:8787";
-
 const SPEED_OPTIONS = [0.5, 1, 2, 4];
 const INITIAL_FRAME_BUDGET = 20;
-const POOL_SIZE = Math.min(navigator.hardwareConcurrency || 4, 8);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -70,19 +58,6 @@ function prevLoadedIndex(loaded: Set<number>, current: number, frameCount: numbe
     }
   }
   return null;
-}
-
-function createWorkerPool(onMessage: (e: MessageEvent, layerId: string) => void, layerId: string): Worker[] {
-  const pool: Worker[] = [];
-  for (let i = 0; i < POOL_SIZE; i++) {
-    const w = new Worker(
-      new URL("../workers/radarFrameWorker.ts", import.meta.url),
-      { type: "module" }
-    );
-    w.onmessage = (e) => onMessage(e, layerId);
-    pool.push(w);
-  }
-  return pool;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -126,8 +101,8 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
   useEffect(() => {
     return () => {
       stopTimer();
-      for (const data of layerDataRef.current.values()) {
-        data.pool.forEach((w) => w.terminate());
+      for (const [layerId] of layerDataRef.current.entries()) {
+        wasmRef.current?.clear_frame_cache(layerId);
       }
       layerDataRef.current.clear();
     };
@@ -136,78 +111,13 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
   // Teardown layers that have been removed
   useEffect(() => {
     const activeIds = new Set(radarLayers.map((l) => l.id));
-    for (const [id, data] of layerDataRef.current.entries()) {
+    for (const [id] of layerDataRef.current.entries()) {
       if (!activeIds.has(id)) {
-        data.pool.forEach((w) => w.terminate());
+        wasmRef.current?.clear_frame_cache(id);
         layerDataRef.current.delete(id);
       }
     }
   }, [radarLayers]);
-
-  // ── Worker message handler ────────────────────────────────────────────────
-
-  function handleWorkerMessage(e: MessageEvent, layerId: string) {
-    const msg = e.data;
-    const layerData = layerDataRef.current.get(layerId);
-    if (!layerData) return;
-
-    switch (msg.type) {
-      case "frame": {
-        const w = wasmRef.current;
-        if (w && msg.sweep && !layerData.initialLoaded) {
-          // Initial load: push sweep geometry into Bevy
-          const s = msg.sweep;
-          w.add_scan(
-            layerId,
-            s.elevation_angle,
-            s.gate_size_m,
-            s.first_gate_m,
-            new Float32Array(s.azimuths),
-            new Float32Array(s.reflectivity)
-          );
-          w.commit_volume(layerId, layerData.siteId);
-          layerData.initialLoaded = true;
-        }
-        layerData.frameCache.set(msg.frameIndex, {
-          data: msg.data,
-          numRays: msg.numRays,
-          numGates: msg.numGates,
-        });
-        layerData.loadedFrames.add(msg.frameIndex);
-
-        // If this is the primary layer, update global loadedFrames
-        if (layerId === primaryIdRef.current) {
-          setState((s) => {
-            const loaded = new Set(s.loadedFrames);
-            loaded.add(msg.frameIndex);
-            return { ...s, loadedFrames: loaded, ready: true };
-          });
-        }
-        break;
-      }
-      case "prefetched": {
-        layerData.frameCache.set(msg.frameIndex, {
-          data: msg.data,
-          numRays: msg.numRays,
-          numGates: msg.numGates,
-        });
-        layerData.loadedFrames.add(msg.frameIndex);
-
-        if (layerId === primaryIdRef.current) {
-          setState((s) => {
-            const loaded = new Set(s.loadedFrames);
-            loaded.add(msg.frameIndex);
-            return { ...s, loadedFrames: loaded };
-          });
-        }
-        break;
-      }
-      case "error": {
-        console.error(`[radarFrameWorker][${layerId}]`, msg.message);
-        break;
-      }
-    }
-  }
 
   // ── Apply frame to all layers ─────────────────────────────────────────────
 
@@ -220,11 +130,10 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
     if (!w) return;
     const s = stateRef.current;
     for (const [layerId, data] of layerDataRef.current.entries()) {
-      if (!data.initialLoaded) continue;
+      if (!data.initialLoaded || data.files.length === 0) continue;
       if (layerId === primaryIdRef.current) {
-        const cached = data.frameCache.get(primaryFrameIndex);
-        if (cached) {
-          w.update_layer_texture(layerId, cached.numRays, cached.numGates, cached.data);
+        if (data.loadedFrames.has(primaryFrameIndex)) {
+          w.apply_frame(layerId, data.files[primaryFrameIndex]);
           data.currentFrameIndex = primaryFrameIndex;
         }
       } else {
@@ -234,11 +143,8 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
           Math.max(0, ...data.loadedFrames) + 1, s.loop
         );
         if (next !== null) {
-          const cached = data.frameCache.get(next);
-          if (cached) {
-            w.update_layer_texture(layerId, cached.numRays, cached.numGates, cached.data);
-            data.currentFrameIndex = next;
-          }
+          w.apply_frame(layerId, data.files[next]);
+          data.currentFrameIndex = next;
         }
       }
     }
@@ -364,10 +270,13 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
    * Called when the user selects a site in the sidebar.
    */
   const initLayer = useCallback((layerId: string, siteId: string) => {
+    const w = wasmRef.current;
+    if (!w) return;
+
     // Teardown existing data for this layer
     const existing = layerDataRef.current.get(layerId);
     if (existing) {
-      existing.pool.forEach((w) => w.terminate());
+      w.clear_frame_cache(layerId);
     }
 
     const isPrimary = layerDataRef.current.size === 0 || layerId === primaryIdRef.current || primaryIdRef.current === null;
@@ -377,8 +286,7 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
 
     const layerData: LayerData = {
       siteId,
-      pool: [],
-      frameCache: new Map(),
+      files: [],
       loadedFrames: new Set(),
       initialLoaded: false,
       currentFrameIndex: 0,
@@ -404,12 +312,10 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
     const day = String(d.getDate()).padStart(2, "0");
     const date = `${y}/${m}/${day}`;
 
-    fetch(`${NEXRAD_API}?frames=1&date=${encodeURIComponent(date)}&radar=${encodeURIComponent(siteId)}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Frame list fetch failed: ${res.status}`);
-        return res.json() as Promise<{ files: string[]; timestamps: string[]; count: number }>;
-      })
-      .then((data) => {
+    w.list_radar_frames(siteId, date)
+      .then((json: string) => {
+        const data = JSON.parse(json) as { files: string[]; timestamps: string[]; count: number };
+
         // Guard: if this layer was re-initialized before response arrived, discard
         const current = layerDataRef.current.get(layerId);
         if (!current || current.siteId !== siteId) return;
@@ -417,7 +323,7 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
         const { files, timestamps, count } = data;
         const latestIdx = count > 0 ? count - 1 : 0;
 
-        // Set the layer's initial frame position to the latest frame
+        current.files = files;
         current.currentFrameIndex = latestIdx;
 
         if (isPrimary) {
@@ -432,31 +338,54 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
 
         if (count === 0) return;
 
-        const pool = createWorkerPool(handleWorkerMessage, layerId);
-        current.pool = pool;
+        // Load the latest frame first (initial — creates mesh)
+        w.load_initial_frame(layerId, files[latestIdx], siteId)
+          .then(() => {
+            const cur = layerDataRef.current.get(layerId);
+            if (!cur || cur.siteId !== siteId) return;
+            cur.initialLoaded = true;
+            cur.loadedFrames.add(latestIdx);
 
-        for (const w of pool) {
-          w.postMessage({ type: "setFiles", files, baseUrl: NEXRAD_API });
-        }
+            if (isPrimary) {
+              setState((s) => {
+                const loaded = new Set(s.loadedFrames);
+                loaded.add(latestIdx);
+                return { ...s, loadedFrames: loaded, ready: true };
+              });
+            }
+          })
+          .catch((err: unknown) => {
+            console.error(`[useMultiLayerAnimation] load_initial_frame(${layerId}) failed:`, err);
+          });
 
-        pool[0].postMessage({ type: "fetch", frameIndex: latestIdx, initial: true });
-
+        // Prefetch remaining frames in the budget
         const prefetchStart = Math.max(0, count - INITIAL_FRAME_BUDGET);
         const indices: number[] = [];
         for (let i = prefetchStart; i < count; i++) {
           if (i !== latestIdx) indices.push(i);
         }
-        if (indices.length > 0) {
-          const batches: number[][] = Array.from({ length: pool.length }, () => []);
-          indices.forEach((idx, i) => batches[i % pool.length].push(idx));
-          for (let i = 0; i < pool.length; i++) {
-            if (batches[i].length > 0) {
-              pool[i].postMessage({ type: "prefetch", indices: batches[i] });
-            }
-          }
+
+        for (const idx of indices) {
+          w.load_frame(layerId, files[idx])
+            .then(() => {
+              const cur = layerDataRef.current.get(layerId);
+              if (!cur || cur.siteId !== siteId) return;
+              cur.loadedFrames.add(idx);
+
+              if (isPrimary) {
+                setState((s) => {
+                  const loaded = new Set(s.loadedFrames);
+                  loaded.add(idx);
+                  return { ...s, loadedFrames: loaded };
+                });
+              }
+            })
+            .catch(() => {
+              // Skip failed frames
+            });
         }
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error(`[useMultiLayerAnimation] initLayer(${layerId}) failed:`, err);
       });
   }, []);
