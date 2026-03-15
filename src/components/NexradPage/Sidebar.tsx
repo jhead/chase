@@ -4,8 +4,9 @@ import { ChevronRight, ChevronLeft, Layers } from "lucide-react";
 import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
 import type { AnimationState } from "../../hooks/useMultiLayerAnimation";
-import type { Layer, AlertsLayer, RadarLayer, Product } from "../../hooks/useLayers";
+import type { Layer, AlertsLayer, RadarLayer, SitesLayer, Product } from "../../hooks/useLayers";
 import type { AlertFeature } from "../../hooks/useAlertsData";
+import { LayerCard } from "./LayerCard";
 import { RadarLayerCard } from "./RadarLayerCard";
 import { AlertsLayerCard } from "./AlertsLayerCard";
 
@@ -15,7 +16,7 @@ interface SidebarProps {
   onToggleLoop: () => void;
   onSelectSite: (layerId: string, siteId: string) => void;
   layers: Layer[];
-  addLayer: (kind: "radar") => void;
+  addLayer: (kind: "radar" | "radar-sites") => void;
   removeLayer: (id: string) => void;
   updateLayer: <T extends Layer>(id: string, updates: Partial<T>) => void;
   activeAlert: AlertFeature | null;
@@ -70,28 +71,59 @@ export function Sidebar({
       <Section>
         <SectionLabel>Layers</SectionLabel>
 
-        {layers.map((layer) => {
-          if (layer.kind === "radar") {
-            const layerUiState = uiState.radar_layers.find((s) => s.layer_id === layer.id) ?? null;
-            return (
-              <RadarLayerCard
-                key={layer.id}
-                layer={layer}
-                layerUiState={layerUiState}
-                canRemove={radarLayers.length > 1}
-                onToggle={() => updateLayer(layer.id, { enabled: !layer.enabled })}
-                onRemove={() => {
-                  removeLayer(layer.id);
-                  sendCommand({ type: "RemoveLayer", layer_id: layer.id });
-                }}
-                onSiteSelect={(siteId) => {
-                  updateLayer(layer.id, { siteId });
-                  onSelectSite(layer.id, siteId);
-                }}
-                onProductChange={(product: Product) => updateLayer(layer.id, { product })}
-              />
-            );
-          }
+        {/* Radar sites (clickable icons on map) */}
+        {layers
+          .filter((l): l is SitesLayer => l.kind === "radar-sites")
+          .map((layer) => (
+            <LayerCard
+              key={layer.id}
+              label="Radar Sites"
+              enabled={layer.enabled}
+              onToggle={() => {
+                const visible = !layer.enabled;
+                sendCommand({ type: "SetLayerVisible", layer_id: layer.id, visible });
+                updateLayer(layer.id, { enabled: visible });
+              }}
+              onRemove={() => {
+                removeLayer(layer.id);
+                sendCommand({ type: "SetLayerVisible", layer_id: layer.id, visible: false });
+              }}
+            />
+          ))}
+        {!layers.some((l) => l.kind === "radar-sites") && (
+          <AddLayerBtn
+            onClick={() => {
+              addLayer("radar-sites");
+              sendCommand({ type: "SetLayerVisible", layer_id: "radar-sites", visible: true });
+            }}
+          >
+            + Radar Sites
+          </AddLayerBtn>
+        )}
+
+        {radarLayers.map((layer) => {
+          const layerUiState = uiState.radar_layers.find((s) => s.layer_id === layer.id) ?? null;
+          return (
+            <RadarLayerCard
+              key={layer.id}
+              layer={layer}
+              layerUiState={layerUiState}
+              canRemove={radarLayers.length > 1}
+              onToggle={() => updateLayer(layer.id, { enabled: !layer.enabled })}
+              onRemove={() => {
+                removeLayer(layer.id);
+                sendCommand({ type: "RemoveLayer", layer_id: layer.id });
+              }}
+              onSiteSelect={(siteId) => {
+                updateLayer(layer.id, { siteId });
+                onSelectSite(layer.id, siteId);
+              }}
+              onProductChange={(product: Product) => updateLayer(layer.id, { product })}
+            />
+          );
+        })}
+
+        {alertsLayers.map((layer) => {
           return (
             <AlertsLayerCard
               key={layer.id}

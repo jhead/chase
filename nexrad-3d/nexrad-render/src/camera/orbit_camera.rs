@@ -25,7 +25,7 @@ pub struct OrbitCamera {
     /// Vertical tilt in radians. 0 = horizon, PI/2 = straight down.
     pub pitch: f32,
     /// World-space grab point for pixel-perfect pan; cleared when pan button released.
-    pan_grab: Option<Vec3>,
+    pub pan_grab: Option<Vec3>,
 }
 
 impl Default for OrbitCamera {

@@ -6,9 +6,13 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use bevy::picking::prelude::{MeshPickingPlugin, Pointer};
+use bevy::picking::events::Click;
+
 use crate::{
     basemap::BasemapPlugin,
     camera::orbit_camera::{CameraMode, OrbitCamera, OrbitCameraPlugin},
+    overlay::{radar_sites::RadarSitesPlugin, OverlayLayerId, SiteClickNotifier},
     rendering::{
         elevation_mesh::build_elevation_mesh,
         radar_material::RadarMaterial,
@@ -83,6 +87,8 @@ pub enum JsCommand {
     SetAlerts { layer_id: String, alerts: Vec<AlertPolygonData> },
     /// Remove all alert polygons for an alerts layer.
     ClearAlerts { layer_id: String },
+    /// Show or hide overlay layer entities (e.g. radar-sites).
+    SetLayerVisible { layer_id: String, visible: bool },
 }
 
 impl JsCommand {
@@ -119,6 +125,11 @@ impl JsCommand {
             "ClearAlerts" => {
                 let layer_id = v["layer_id"].as_str()?.to_string();
                 Some(JsCommand::ClearAlerts { layer_id })
+            }
+            "SetLayerVisible" => {
+                let layer_id = v["layer_id"].as_str()?.to_string();
+                let visible = v["visible"].as_bool().unwrap_or(true);
+                Some(JsCommand::SetLayerVisible { layer_id, visible })
             }
             _ => None,
         }
@@ -292,13 +303,19 @@ impl Plugin for RadarPlugin {
 
         app.init_resource::<LoadStatus>()
             .init_resource::<StateNotifier>()
+            .init_resource::<SiteClickNotifier>()
             .init_resource::<UiStateResource>()
             .init_resource::<RadarLayerStates>()
             .add_plugins(BasemapPlugin)
             .add_plugins(OrbitCameraPlugin)
+            .add_plugins(MeshPickingPlugin)
             .add_plugins(MaterialPlugin::<RadarMaterial>::default())
+            .add_plugins(RadarSitesPlugin)
             .add_systems(Startup, setup_scene_lighting)
-            .add_systems(Update, receive_radar_data);
+            .add_systems(Update, receive_radar_data)
+            .add_observer(|trigger: On<Pointer<Click>>| {
+                log::info!("global Pointer<Click> on entity {:?}", trigger.entity);
+            });
     }
 }
 
@@ -463,6 +480,7 @@ fn drain_js_commands(
     mut camera: Query<&mut OrbitCamera>,
     elevations: Query<(Entity, &LayerId), With<RadarElevation>>,
     mut sweeps: Query<(&mut Visibility, &ElevationIndex, &LayerId), With<RadarElevation>>,
+    mut overlay_visibility: Query<(&OverlayLayerId, &mut Visibility), Without<RadarElevation>>,
     notifier: Res<StateNotifier>,
     mut ui_state: ResMut<UiStateResource>,
     mut layer_states: ResMut<RadarLayerStates>,
@@ -528,6 +546,13 @@ fn drain_js_commands(
             }
             JsCommand::SetCameraMode(new_mode) => {
                 *camera_mode = new_mode;
+            }
+            JsCommand::SetLayerVisible { layer_id, visible } => {
+                for (lid, mut vis) in &mut overlay_visibility {
+                    if lid.0 == layer_id {
+                        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
+                    }
+                }
             }
         }
     }

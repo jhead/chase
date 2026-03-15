@@ -25,6 +25,11 @@ export function send_command(json: string): void;
 export function set_alert_click_callback(cb: Function): void;
 
 /**
+ * Register a JS callback to be invoked when a radar site marker is clicked. The callback receives the site ID string (e.g. "KDMX").
+ */
+export function set_site_click_callback(cb: Function): void;
+
+/**
  * Register a JS callback to receive UiState updates from Bevy.
  */
 export function set_state_callback(cb: Function): void;

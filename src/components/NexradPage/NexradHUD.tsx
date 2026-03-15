@@ -1,22 +1,23 @@
 import styled from "@emotion/styled";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useWasm } from "../../ctx/WasmContext";
+import { useLayers } from "../../hooks/useLayers";
+import { useMultiLayerAnimation } from "../../hooks/useMultiLayerAnimation";
+import { useAlertsData } from "../../hooks/useAlertsData";
+import type { AlertPolygonPayload } from "../../ctx/WasmContext";
+import type { RadarLayer } from "../../hooks/useLayers";
 import { TopBar } from "./TopBar";
 import { Sidebar } from "./Sidebar";
 import { CanvasButtons } from "./CanvasButtons";
 import { ReflectivityLegend } from "./ReflectivityLegend";
 import { ScrubBar } from "./ScrubBar";
-import { useLayers } from "../../hooks/useLayers";
-import { useMultiLayerAnimation } from "../../hooks/useMultiLayerAnimation";
-import { useAlertsData } from "../../hooks/useAlertsData";
-import { useWasm } from "../../ctx/WasmContext";
-import type { AlertPolygonPayload } from "../../ctx/WasmContext";
-import type { RadarLayer } from "../../hooks/useLayers";
 
 export function NexradHUD() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   void sidebarOpen;
 
-  const { layers, addLayer, removeLayer, updateLayer } = useLayers();
+  const { wasm } = useWasm();
+  const { layers, addLayer, addRadarLayer, removeLayer, updateLayer } = useLayers();
   const radarLayers = layers.filter((l): l is RadarLayer => l.kind === "radar");
   const alertsLayer = layers.find((l) => l.kind === "nws-alerts") ?? null;
 
@@ -45,6 +46,16 @@ export function NexradHUD() {
     }
     sendCommand({ type: "SetAlerts", layer_id: alertsLayer.id, alerts: payloads });
   }, [alertsData, alertsLayer?.enabled, alertsLayer?.id, alertsLayer?.phenomena.join(","), alertsLayer?.significance.join(","), isReady, sendCommand]);
+
+  useEffect(() => {
+    if (!wasm) return;
+    wasm.set_site_click_callback((siteId: string) => {
+      const alreadyActive = radarLayers.some((l) => l.siteId === siteId);
+      if (alreadyActive) return;
+      const newId = addRadarLayer(siteId);
+      anim.initLayer(newId, siteId);
+    });
+  }, [wasm, radarLayers, addRadarLayer, anim]);
 
   return (
     <Root>

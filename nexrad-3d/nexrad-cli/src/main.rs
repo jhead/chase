@@ -85,7 +85,7 @@ fn setup_cameras(
         (std::f32::consts::FRAC_PI_2,           0.6),
     ];
     for (i, (yaw, pitch)) in views.iter().enumerate() {
-        let orbit = OrbitCamera { focus: Vec3::ZERO, radius: 400_000.0, yaw: *yaw, pitch: *pitch };
+        let orbit = OrbitCamera { focus: Vec3::ZERO, radius: 400_000.0, yaw: *yaw, pitch: *pitch, pan_grab: None };
         let transform = orbit.to_transform();
         let camera = Camera { order: i as isize, ..default() };
         if i == 0 {
