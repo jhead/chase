@@ -1,49 +1,32 @@
 import { useState } from "react";
 import styled from "@emotion/styled";
 import { ChevronRight, ChevronLeft, Layers } from "lucide-react";
-import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
 import type { AnimationState } from "../../hooks/useMultiLayerAnimation";
-import type { Layer, AlertsLayer, RadarLayer, SitesLayer, Product } from "../../hooks/useLayers";
-import type { AlertFeature } from "../../hooks/useAlertsData";
-import { LayerCard } from "./LayerCard";
-import { RadarLayerCard } from "./RadarLayerCard";
-import { AlertsLayerCard } from "./AlertsLayerCard";
+import type { LayerBase } from "../../plugins/registry";
+import { getPlugin, getPlugins } from "../../plugins/registry";
 
 interface SidebarProps {
   animationState: AnimationState;
   onSetSpeed: (speed: number) => void;
   onToggleLoop: () => void;
-  onSelectSite: (layerId: string, siteId: string) => void;
-  layers: Layer[];
-  addLayer: (kind: "radar" | "radar-sites") => void;
+  layers: LayerBase[];
+  addLayer: (kind: string) => string;
   removeLayer: (id: string) => void;
-  updateLayer: <T extends Layer>(id: string, updates: Partial<T>) => void;
-  activeAlert: AlertFeature | null;
-  onDismissAlert: () => void;
-  alertCount: number;
-  lastUpdated: Date | null;
+  updateLayer: (id: string, updates: Partial<LayerBase>) => void;
 }
 
 export function Sidebar({
   animationState,
   onSetSpeed,
   onToggleLoop,
-  onSelectSite,
   layers,
   addLayer,
   removeLayer,
   updateLayer,
-  activeAlert,
-  onDismissAlert,
-  alertCount,
-  lastUpdated,
 }: SidebarProps) {
   const [expanded, setExpanded] = useState(true);
-  const { uiState, sendCommand } = useWasm();
-
-  const radarLayers = layers.filter((l): l is RadarLayer => l.kind === "radar");
-  const alertsLayers = layers.filter((l): l is AlertsLayer => l.kind === "nws-alerts");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   if (!expanded) {
     return (
@@ -58,6 +41,12 @@ export function Sidebar({
     );
   }
 
+  // Plugins available to add (non-singleton, or singleton not yet added)
+  const addablePlugins = getPlugins().filter((p) => {
+    if (p.singleton && layers.some((l) => l.kind === p.kind)) return false;
+    return true;
+  });
+
   return (
     <Panel>
       <CollapseRow>
@@ -71,94 +60,53 @@ export function Sidebar({
       <Section>
         <SectionLabel>Layers</SectionLabel>
 
-        {/* Radar sites (clickable icons on map) */}
-        {layers
-          .filter((l): l is SitesLayer => l.kind === "radar-sites")
-          .map((layer) => (
-            <LayerCard
-              key={layer.id}
-              label="Radar Sites"
-              enabled={layer.enabled}
-              onToggle={() => {
-                const visible = !layer.enabled;
-                sendCommand({ type: "SetLayerVisible", layer_id: layer.id, visible });
-                updateLayer(layer.id, { enabled: visible });
-              }}
-              onRemove={() => {
-                removeLayer(layer.id);
-                sendCommand({ type: "SetLayerVisible", layer_id: layer.id, visible: false });
-              }}
-            />
-          ))}
-        {!layers.some((l) => l.kind === "radar-sites") && (
-          <AddLayerBtn
-            onClick={() => {
-              addLayer("radar-sites");
-              sendCommand({ type: "SetLayerVisible", layer_id: "radar-sites", visible: true });
-            }}
-          >
-            + Radar Sites
-          </AddLayerBtn>
-        )}
+        {layers.map((layer) => {
+          const plugin = getPlugin(layer.kind);
+          if (!plugin) return null;
 
-        {radarLayers.map((layer) => {
-          const layerUiState = uiState.radar_layers.find((s) => s.layer_id === layer.id) ?? null;
+          const samekindCount = layers.filter((l) => l.kind === layer.kind).length;
+          const Card = plugin.SidebarCard;
+
           return (
-            <RadarLayerCard
+            <Card
               key={layer.id}
               layer={layer}
-              layerUiState={layerUiState}
-              canRemove={radarLayers.length > 1}
+              canRemove={!plugin.singleton && samekindCount > 1}
               onToggle={() => updateLayer(layer.id, { enabled: !layer.enabled })}
-              onRemove={() => {
-                removeLayer(layer.id);
-                sendCommand({ type: "RemoveLayer", layer_id: layer.id });
-              }}
-              onSiteSelect={(siteId) => {
-                updateLayer(layer.id, { siteId });
-                onSelectSite(layer.id, siteId);
-              }}
-              onProductChange={(product: Product) => updateLayer(layer.id, { product })}
-            />
-          );
-        })}
-
-        {alertsLayers.map((layer) => {
-          return (
-            <AlertsLayerCard
-              key={layer.id}
-              layer={layer}
-              alertCount={alertCount}
-              lastUpdated={lastUpdated}
-              canRemove={alertsLayers.length > 1}
-              onToggle={() => updateLayer(layer.id, { enabled: !layer.enabled })}
-              onRemove={() => {
-                removeLayer(layer.id);
-                sendCommand({ type: "ClearAlerts", layer_id: layer.id });
-              }}
+              onRemove={() => removeLayer(layer.id)}
               onUpdateLayer={(updates) => updateLayer(layer.id, updates)}
             />
           );
         })}
 
-        <AddLayerBtn onClick={() => addLayer("radar")}>+ Radar</AddLayerBtn>
+        {/* Add layer menu */}
+        <AddLayerWrap>
+          <AddLayerBtn onClick={() => setMenuOpen((o) => !o)}>+ Add Layer</AddLayerBtn>
+          {menuOpen && addablePlugins.length > 0 && (
+            <AddLayerMenu>
+              {addablePlugins.map((p) => (
+                <AddLayerMenuItem
+                  key={p.kind}
+                  onClick={() => {
+                    addLayer(p.kind);
+                    setMenuOpen(false);
+                  }}
+                >
+                  {p.displayName}
+                </AddLayerMenuItem>
+              ))}
+            </AddLayerMenu>
+          )}
+        </AddLayerWrap>
       </Section>
 
-      {/* Alert detail panel — dismissable */}
-      {activeAlert && (
-        <AlertDetailSection>
-          <AlertDetailHeader>
-            <AlertDetailTitle>{activeAlert.ps}</AlertDetailTitle>
-            <DismissBtn onClick={onDismissAlert} title="Dismiss">×</DismissBtn>
-          </AlertDetailHeader>
-          <AlertDetailMeta>
-            {activeAlert.wfo} · Expires {formatAlertTime(activeAlert.expires)}
-          </AlertDetailMeta>
-          <AlertDetailScroll>
-            {activeAlert.raw ?? `${activeAlert.ps} — ${activeAlert.id}. Issued ${activeAlert.issued}.`}
-          </AlertDetailScroll>
-        </AlertDetailSection>
-      )}
+      {/* Detail panels from plugins */}
+      {getPlugins()
+        .filter((p) => p.DetailPanel)
+        .map((p) => {
+          const Panel = p.DetailPanel!;
+          return <Panel key={p.kind} onDismiss={() => {}} />;
+        })}
 
       {/* Animation */}
       {animationState.ready && (
@@ -166,7 +114,7 @@ export function Sidebar({
           <SectionLabel>Animation</SectionLabel>
           <SliderHeader>
             <SubLabel>Speed</SubLabel>
-            <SliderValue>{animationState.speed}×</SliderValue>
+            <SliderValue>{animationState.speed}&times;</SliderValue>
           </SliderHeader>
           <Slider
             type="range"
@@ -283,6 +231,10 @@ const SubLabel = styled.span`
   color: ${theme.textSecondary};
 `;
 
+const AddLayerWrap = styled.div`
+  position: relative;
+`;
+
 const AddLayerBtn = styled.button`
   background: none;
   border: 1px dashed ${theme.border};
@@ -293,8 +245,40 @@ const AddLayerBtn = styled.button`
   padding: 4px 8px;
   cursor: pointer;
   text-align: left;
+  width: 100%;
   &:hover {
     border-color: ${theme.accent};
+    color: ${theme.accent};
+  }
+`;
+
+const AddLayerMenu = styled.div`
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 2px;
+  padding: 4px 0;
+  background: ${theme.bgSolid};
+  border: 1px solid ${theme.border};
+  border-radius: ${theme.radius};
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+`;
+
+const AddLayerMenuItem = styled.button`
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 6px 10px;
+  text-align: left;
+  font-family: ${theme.fontSans};
+  font-size: 11px;
+  color: ${theme.textPrimary};
+  cursor: pointer;
+  &:hover {
+    background: ${theme.bgHover};
     color: ${theme.accent};
   }
 `;
@@ -345,69 +329,4 @@ const FrameCountLabel = styled.span`
   font-family: ${theme.fontMono};
   font-size: 10px;
   color: ${theme.textDim};
-`;
-
-// ── Alert detail panel ───────────────────────────────────────────────────────
-
-function formatAlertTime(iso: string): string {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
-  } catch {
-    return iso;
-  }
-}
-
-const AlertDetailSection = styled.div`
-  padding: 10px;
-  border-top: 1px solid ${theme.border};
-  background: rgba(0, 0, 0, 0.2);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 200px;
-  flex-shrink: 0;
-`;
-
-const AlertDetailHeader = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-`;
-
-const AlertDetailTitle = styled.span`
-  font-family: ${theme.fontSans};
-  font-size: 12px;
-  font-weight: 600;
-  color: ${theme.textPrimary};
-`;
-
-const DismissBtn = styled.button`
-  background: none;
-  border: none;
-  color: ${theme.textDim};
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 2px;
-  &:hover { color: ${theme.textSecondary}; }
-`;
-
-const AlertDetailMeta = styled.span`
-  font-family: ${theme.fontMono};
-  font-size: 10px;
-  color: ${theme.textDim};
-`;
-
-const AlertDetailScroll = styled.div`
-  font-family: ${theme.fontSans};
-  font-size: 11px;
-  color: ${theme.textSecondary};
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
 `;

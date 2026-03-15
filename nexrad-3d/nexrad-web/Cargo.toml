@@ -9,6 +9,10 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 nexrad-render = { path = "../nexrad-render" }
 nexrad-core = { path = "../nexrad-core" }
+layer-basemap = { path = "../../plugins/layer-basemap/crate" }
+layer-radar-l2 = { path = "../../plugins/layer-radar-l2/crate" }
+layer-noaa-alerts = { path = "../../plugins/layer-noaa-alerts/crate" }
+layer-radar-sites = { path = "../../plugins/layer-radar-sites/crate" }
 async-channel = "2.5.0"
 bevy = "0.18.1"
 log = "0.4"

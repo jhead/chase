@@ -1,11 +1,12 @@
 import { useState } from "react";
 import styled from "@emotion/styled";
-import { RADAR_SITES } from "../../data/radarSites";
-import { useWasm } from "../../ctx/WasmContext";
-import type { UiRadarLayerState } from "../../ctx/WasmContext";
-import { theme } from "./theme";
-import { LayerCard } from "./LayerCard";
-import type { RadarLayer, Product } from "../../hooks/useLayers";
+import { RADAR_SITES } from "../../../src/data/radarSites";
+import { useWasm } from "../../../src/ctx/WasmContext";
+import type { UiRadarLayerState } from "../../../src/ctx/WasmContext";
+import { theme } from "../../../src/components/NexradPage/theme";
+import { LayerCard } from "../../../src/components/NexradPage/LayerCard";
+import type { SidebarCardProps } from "../../../src/plugins/registry";
+import type { RadarLayer, Product } from "./types";
 
 const PRODUCTS: { id: Product; label: string; available: boolean }[] = [
   { id: "REF", label: "Reflectivity", available: true },
@@ -14,28 +15,18 @@ const PRODUCTS: { id: Product; label: string; available: boolean }[] = [
   { id: "ZDR", label: "Diff. Refl.",  available: false },
 ];
 
-interface RadarLayerCardProps {
-  layer: RadarLayer;
-  /** Per-layer state from Bevy — null until the layer has loaded data. */
-  layerUiState: UiRadarLayerState | null;
-  canRemove: boolean;
-  onToggle: () => void;
-  onRemove: () => void;
-  onSiteSelect: (siteId: string) => void;
-  onProductChange: (product: Product) => void;
-}
-
 export function RadarLayerCard({
   layer,
-  layerUiState,
   canRemove,
   onToggle,
   onRemove,
-  onSiteSelect,
-  onProductChange,
-}: RadarLayerCardProps) {
+  onUpdateLayer,
+}: SidebarCardProps<RadarLayer>) {
   const [search, setSearch] = useState("");
-  const { sendCommand } = useWasm();
+  const { uiState, sendCommand } = useWasm();
+
+  const layerUiState: UiRadarLayerState | null =
+    uiState.radar_layers.find((s) => s.layer_id === layer.id) ?? null;
 
   const filtered = search.length >= 1
     ? RADAR_SITES.filter(
@@ -47,11 +38,15 @@ export function RadarLayerCard({
 
   function handleSiteSelect(siteId: string) {
     setSearch("");
-    onSiteSelect(siteId);
+    onUpdateLayer({ siteId } as Partial<RadarLayer>);
   }
 
-  // Label shows the loaded site if this is the active layer, otherwise the
-  // configured site, falling back to "Radar".
+  function handleToggle() {
+    const visible = !layer.enabled;
+    sendCommand({ type: "SetLayerVisible", layer_id: layer.id, visible });
+    onToggle();
+  }
+
   const label = layer.siteId
     ? `Radar — ${layer.siteId}`
     : "Radar";
@@ -60,7 +55,7 @@ export function RadarLayerCard({
     <LayerCard
       label={label}
       enabled={layer.enabled}
-      onToggle={onToggle}
+      onToggle={handleToggle}
       onRemove={canRemove ? onRemove : undefined}
     >
       {/* Site */}
@@ -93,14 +88,14 @@ export function RadarLayerCard({
             active={layer.product === id}
             disabled={!available}
             title={available ? plabel : `${plabel} — coming soon`}
-            onClick={() => available && onProductChange(id)}
+            onClick={() => available && onUpdateLayer({ product: id } as Partial<RadarLayer>)}
           >
             {id}
           </ProductBtn>
         ))}
       </ProductGrid>
 
-      {/* Product-specific controls — only shown for the active/loaded state */}
+      {/* Product-specific controls */}
       {layer.product === "REF" && layerUiState && layerUiState.elevation_total > 0 && (
         <>
           <SliderHeader>

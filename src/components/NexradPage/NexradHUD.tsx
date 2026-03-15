@@ -1,17 +1,26 @@
 import styled from "@emotion/styled";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useWasm } from "../../ctx/WasmContext";
 import { useLayers } from "../../hooks/useLayers";
 import { useMultiLayerAnimation } from "../../hooks/useMultiLayerAnimation";
-import { useAlertsData } from "../../hooks/useAlertsData";
 import { usePinchZoom } from "../../hooks/usePinchZoom";
-import type { AlertPolygonPayload } from "../../ctx/WasmContext";
-import type { RadarLayer } from "../../hooks/useLayers";
+import { getPlugin } from "../../plugins/registry";
+import type { LayerBase, PluginContext } from "../../plugins/registry";
 import { TopBar } from "./TopBar";
 import { Sidebar } from "./Sidebar";
 import { CanvasButtons } from "./CanvasButtons";
 import { ReflectivityLegend } from "./ReflectivityLegend";
 import { ScrubBar } from "./ScrubBar";
+
+// ── Per-layer effect runner ──────────────────────────────────────────────────
+
+function LayerEffectRunner({ layer, ctx }: { layer: LayerBase; ctx: PluginContext }) {
+  const plugin = getPlugin(layer.kind);
+  plugin?.useLayerEffect?.(layer, ctx);
+  return null;
+}
+
+// ── HUD ──────────────────────────────────────────────────────────────────────
 
 export function NexradHUD() {
   usePinchZoom();
@@ -19,46 +28,53 @@ export function NexradHUD() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   void sidebarOpen;
 
-  const { wasm } = useWasm();
-  const { layers, addLayer, addRadarLayer, removeLayer, updateLayer } = useLayers();
-  const radarLayers = layers.filter((l): l is RadarLayer => l.kind === "radar");
-  const alertsLayer = layers.find((l) => l.kind === "nws-alerts") ?? null;
+  const { wasm, sendCommand, isReady, subscribe } = useWasm();
+  const { layers, addLayer, removeLayer, updateLayer } = useLayers();
 
+  // Filter radar layers for animation (need siteId field)
+  const radarLayers = layers.filter((l) => l.kind === "radar-l2" && l.siteId) as (LayerBase & { siteId: string })[];
   const anim = useMultiLayerAnimation(radarLayers);
-  const { alertsData, alertCount, lastUpdated } = useAlertsData(
-    alertsLayer?.kind === "nws-alerts" ? alertsLayer : undefined
-  );
-  const { activeAlertId, dismissAlert, sendCommand, isReady } = useWasm();
 
-  const activeAlert = alertsData.find((a) => a.id === activeAlertId) ?? null;
+  // Build plugin context for layer effects
+  const pluginCtx: PluginContext = { wasm, isReady, sendCommand, subscribe };
 
-  // Sync alerts to Bevy when data or layer config changes
+  // Track previous siteId per layer so we only call initLayer on actual changes.
+  const prevSiteIdsRef = useRef(new Map<string, string>());
+
+  // Call initLayer when a radar-l2 layer gets a new or changed siteId.
   useEffect(() => {
-    if (!isReady || !alertsLayer || alertsLayer.kind !== "nws-alerts") return;
-    if (!alertsLayer.enabled) {
-      sendCommand({ type: "ClearAlerts", layer_id: alertsLayer.id });
-      return;
+    for (const layer of layers) {
+      if (layer.kind !== "radar-l2") continue;
+      const siteId = layer.siteId as string | null;
+      const prev = prevSiteIdsRef.current.get(layer.id) ?? null;
+      if (siteId && siteId !== prev) {
+        prevSiteIdsRef.current.set(layer.id, siteId);
+        anim.initLayer(layer.id, siteId);
+      }
     }
-    const payloads: AlertPolygonPayload[] = alertsData.map((a) => ({
-      id: a.id,
-      coordinates: a.coordinates[0] ?? [],
-      color: a.color,
-    }));
-    if (payloads.length > 0) {
-      console.info("[NexradHUD] Sending SetAlerts to Bevy:", payloads.length, "polygons");
-    }
-    sendCommand({ type: "SetAlerts", layer_id: alertsLayer.id, alerts: payloads });
-  }, [alertsData, alertsLayer?.enabled, alertsLayer?.id, alertsLayer?.phenomena.join(","), alertsLayer?.significance.join(","), isReady, sendCommand]);
+  }, [layers, anim]);
+
+  // Handle site clicks — add a new radar layer for the clicked site.
+  // Re-subscribe only when subscribe reference changes (stable), not on every layers change.
+  const layersRef = useRef(layers);
+  layersRef.current = layers;
+  const addLayerRef = useRef(addLayer);
+  addLayerRef.current = addLayer;
+  const updateLayerRef = useRef(updateLayer);
+  updateLayerRef.current = updateLayer;
 
   useEffect(() => {
-    if (!wasm) return;
-    wasm.set_site_click_callback((siteId: string) => {
-      const alreadyActive = radarLayers.some((l) => l.siteId === siteId);
+    return subscribe("site_click", (siteId: string) => {
+      const alreadyActive = layersRef.current.some(
+        (l: LayerBase) => l.kind === "radar-l2" && l.siteId === siteId
+      );
       if (alreadyActive) return;
-      const newId = addRadarLayer(siteId);
-      anim.initLayer(newId, siteId);
+      const newId = addLayerRef.current("radar-l2");
+      if (newId) {
+        updateLayerRef.current(newId, { siteId });
+      }
     });
-  }, [wasm, radarLayers, addRadarLayer, anim]);
+  }, [subscribe]);
 
   return (
     <Root>
@@ -78,15 +94,10 @@ export function NexradHUD() {
           animationState={anim.state}
           onSetSpeed={anim.setSpeed}
           onToggleLoop={anim.toggleLoop}
-          onSelectSite={(layerId, siteId) => anim.initLayer(layerId, siteId)}
           layers={layers}
           addLayer={addLayer}
           removeLayer={removeLayer}
           updateLayer={updateLayer}
-          activeAlert={activeAlert}
-          onDismissAlert={dismissAlert}
-          alertCount={alertCount}
-          lastUpdated={lastUpdated}
         />
         <CanvasArea>
           <CanvasButtons />
@@ -96,6 +107,11 @@ export function NexradHUD() {
           <ReflectivityLegend />
         </CanvasArea>
       </Body>
+
+      {/* Run per-layer plugin effects */}
+      {layers.map((layer) => (
+        <LayerEffectRunner key={layer.id} layer={layer} ctx={pluginCtx} />
+      ))}
     </Root>
   );
 }

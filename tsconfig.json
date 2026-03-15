@@ -14,12 +14,24 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* Path aliases */
+    "paths": {
+      "@chase/layer-basemap": ["./plugins/layer-basemap/src/index.ts"],
+      "@chase/layer-basemap/*": ["./plugins/layer-basemap/src/*"],
+      "@chase/layer-radar-l2": ["./plugins/layer-radar-l2/src/index.ts"],
+      "@chase/layer-radar-l2/*": ["./plugins/layer-radar-l2/src/*"],
+      "@chase/layer-noaa-alerts": ["./plugins/layer-noaa-alerts/src/index.ts"],
+      "@chase/layer-noaa-alerts/*": ["./plugins/layer-noaa-alerts/src/*"],
+      "@chase/layer-radar-sites": ["./plugins/layer-radar-sites/src/index.ts"],
+      "@chase/layer-radar-sites/*": ["./plugins/layer-radar-sites/src/*"]
+    },
+
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
+  "include": ["src", "plugins/*/src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

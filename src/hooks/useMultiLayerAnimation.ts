@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useWasm } from "../ctx/WasmContext";
-import type { RadarLayer } from "./useLayers";
+interface RadarLayer {
+  id: string;
+  kind: string;
+  enabled: boolean;
+  siteId: string | null;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

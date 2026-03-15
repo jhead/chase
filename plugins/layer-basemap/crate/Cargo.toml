@@ -1,0 +1,12 @@
+[package]
+name = "layer-basemap"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nexrad-render = { path = "../../../nexrad-3d/nexrad-render" }
+nexrad-core = { path = "../../../nexrad-3d/nexrad-core" }
+bevy = "0.18.1"
+geojson = "0.24"
+geo-types = "0.7"
+log = "0.4"

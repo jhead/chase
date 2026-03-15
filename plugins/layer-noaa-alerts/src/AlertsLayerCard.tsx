@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from "react";
 import styled from "@emotion/styled";
-import { theme } from "./theme";
-import { LayerCard } from "./LayerCard";
-import type { AlertsLayer } from "../../hooks/useLayers";
+import { theme } from "../../../src/components/NexradPage/theme";
+import { LayerCard } from "../../../src/components/NexradPage/LayerCard";
+import { useAlertsMeta } from "./alertsStore";
+import type { SidebarCardProps } from "../../../src/plugins/registry";
+import type { AlertsLayer } from "./types";
 
-// Full NWS VTEC phenomenon codes (2-letter) with short labels for UI
 const PHENOMENA: { code: string; label: string }[] = [
   { code: "AF", label: "Airborne Fire" },
   { code: "AS", label: "Ash" },
@@ -61,16 +62,6 @@ const SIGNIFICANCE: { code: string; label: string }[] = [
   { code: "S", label: "Statement" },
 ];
 
-interface AlertsLayerCardProps {
-  layer: AlertsLayer;
-  alertCount: number;
-  lastUpdated: Date | null;
-  canRemove: boolean;
-  onToggle: () => void;
-  onRemove: () => void;
-  onUpdateLayer: (updates: Partial<AlertsLayer>) => void;
-}
-
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, onOutside: () => void) {
   useEffect(() => {
     function handle(e: MouseEvent) {
@@ -83,14 +74,12 @@ function useClickOutside(ref: React.RefObject<HTMLElement | null>, onOutside: ()
 
 export function AlertsLayerCard({
   layer,
-  alertCount,
-  lastUpdated,
   canRemove,
   onToggle,
   onRemove,
   onUpdateLayer,
-}: AlertsLayerCardProps) {
-  const label = "NWS Alerts";
+}: SidebarCardProps<AlertsLayer>) {
+  const { alertCount, lastUpdated } = useAlertsMeta(layer.id);
   const [phenomOpen, setPhenomOpen] = useState(false);
   const [sigOpen, setSigOpen] = useState(false);
   const phenomRef = useRef<HTMLDivElement>(null);
@@ -103,11 +92,11 @@ export function AlertsLayerCard({
   const showAllSignificance = layer.significance.length === 0;
 
   function setPhenomena(next: string[]) {
-    onUpdateLayer({ phenomena: next });
+    onUpdateLayer({ phenomena: next } as Partial<AlertsLayer>);
   }
 
   function setSignificance(next: string[]) {
-    onUpdateLayer({ significance: next });
+    onUpdateLayer({ significance: next } as Partial<AlertsLayer>);
   }
 
   function togglePhenomenon(code: string) {
@@ -142,11 +131,11 @@ export function AlertsLayerCard({
 
   const lastUpdatedStr = lastUpdated
     ? lastUpdated.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-    : "—";
+    : "\u2014";
 
   return (
     <LayerCard
-      label={label}
+      label="NWS Alerts"
       enabled={layer.enabled}
       onToggle={onToggle}
       onRemove={canRemove ? onRemove : undefined}
@@ -162,7 +151,7 @@ export function AlertsLayerCard({
           title={showAllPhenomena ? "All" : `${layer.phenomena.length} selected`}
         >
           {showAllPhenomena ? "All" : `${layer.phenomena.length} selected`}
-          <span aria-hidden>▼</span>
+          <span aria-hidden>&#9660;</span>
         </DropdownTrigger>
         {phenomOpen && (
           <DropdownPanel>
@@ -199,7 +188,7 @@ export function AlertsLayerCard({
           title={showAllSignificance ? "All" : `${layer.significance.length} selected`}
         >
           {showAllSignificance ? "All" : `${layer.significance.length} selected`}
-          <span aria-hidden>▼</span>
+          <span aria-hidden>&#9660;</span>
         </DropdownTrigger>
         {sigOpen && (
           <DropdownPanel>

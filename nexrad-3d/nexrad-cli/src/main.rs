@@ -7,10 +7,11 @@ use bevy::{
 };
 use clap::Parser;
 use nexrad_core::sites::RadarSite;
-use nexrad_render::{
-    camera::orbit_camera::OrbitCamera,
-    BasemapConfig, LoadStatus, RadarPlugin, RadarVolumeSender, TaggedVolume,
-};
+use nexrad_render::camera::orbit_camera::OrbitCamera;
+use layer_basemap::BasemapConfig;
+use layer_radar_l2::{LoadStatus, RadarL2Plugin, RadarVolumeSender, TaggedVolume};
+use nexrad_render::EnginePlugin;
+use layer_basemap::BasemapPlugin;
 
 #[derive(Parser, Resource, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
@@ -56,7 +57,9 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(RadarPlugin::default())
+        .add_plugins(EnginePlugin)
+        .add_plugins(BasemapPlugin)
+        .add_plugins(RadarL2Plugin::default())
         .insert_resource(basemap_config)
         .insert_resource(args)
         .init_resource::<ScreenshotState>()

@@ -1,17 +1,9 @@
-pub mod alerts;
-pub mod basemap;
 pub mod camera;
-pub mod overlay;
-pub mod plugin;
-pub mod rendering;
+pub mod engine;
 
-pub use basemap::BasemapConfig;
-pub use alerts::{AlertClickCallback, AlertsPlugin};
-pub use overlay::{OverlayLayerId, SiteClickNotifier};
-pub use plugin::{
-    AlertCommand, AlertCommandReceiver, AlertCommandSender, AlertPolygonData,
-    AnimationFrame, AnimationFrameSlots, TaggedVolume,
-    ExternalVolumeReceiver, JsCommand, JsCommandReceiver,
-    LoadStatus, RadarPlugin, RadarVolumeSender, StateNotifier, UiState,
-};
-pub use rendering::radar_material::RadarMaterial;
+// Shared types used by plugins
+mod overlay_types;
+
+pub use overlay_types::{OverlayLayerId, SiteClickNotifier};
+pub use engine::{EngineCommand, EngineCommandReceiver, EnginePlugin};
+pub use camera::orbit_camera::{CameraMode, OrbitCamera, OrbitCameraPlugin};

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useRef } from "react";
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from "react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -19,26 +19,6 @@ export interface NexradWasm {
   update_layer_texture: (layer_id: string, num_rays: number, num_gates: number, data: Uint8Array) => void;
 }
 
-/** Payload for one alert polygon sent to Bevy. */
-export interface AlertPolygonPayload {
-  id: string;
-  coordinates: [number, number][]; // [lng, lat] GeoJSON order
-  color: [number, number, number, number]; // RGBA 0–1
-}
-
-/** Discriminated union of all commands JS can send to the Bevy renderer. */
-export type JsCommand =
-  | { type: "ResetCamera" }
-  | { type: "RemoveLayer"; layer_id: string }
-  | { type: "SetElevationCount"; layer_id: string; count: number }
-  | { type: "SetThreshold"; layer_id: string; dbz: number }
-  | { type: "SetRangeKm"; layer_id: string; range_km: number }
-  | { type: "SetCameraMode"; mode: "2d" | "3d" }
-  | { type: "SetAlerts"; layer_id: string; alerts: AlertPolygonPayload[] }
-  | { type: "ClearAlerts"; layer_id: string }
-  | { type: "SetLayerVisible"; layer_id: string; visible: boolean }
-  | { type: "ZoomAtPoint"; x: number; y: number; delta: number };
-
 /** Per-layer state snapshot pushed from Bevy. */
 export interface UiRadarLayerState {
   layer_id: string;
@@ -52,12 +32,10 @@ export interface UiRadarLayerState {
 /** Serializable state pushed from Bevy to React on meaningful changes. */
 export interface UiState {
   radar_loaded: boolean;
-  // Backwards-compat: mirrors primary layer (radar-1)
   active_site: string | null;
   elevation_count: number;
   elevation_total: number;
   threshold_dbz: number;
-  // Per-layer state
   radar_layers: UiRadarLayerState[];
 }
 
@@ -71,8 +49,6 @@ const DEFAULT_UI_STATE: UiState = {
 };
 
 // ── WASM singleton ────────────────────────────────────────────────────────────
-// Bevy's winit event loop cannot be stopped and restarted, so we keep the
-// module reference alive for the lifetime of the page.
 
 let wasmModule: NexradWasm | null = null;
 let loadPromise: Promise<NexradWasm> | null = null;
@@ -82,9 +58,6 @@ function loadWasm(): Promise<NexradWasm> {
 
   loadPromise = import("../wasm/nexrad_web.js")
     .then((mod) => {
-      // With --target bundler + vite-plugin-wasm, the WASM is initialized
-      // automatically on import and #[wasm_bindgen(start)] runs immediately.
-      // No explicit init call needed.
       wasmModule = mod as unknown as NexradWasm;
       return wasmModule;
     })
@@ -102,9 +75,8 @@ interface WasmContextValue {
   wasm: NexradWasm | null;
   isReady: boolean;
   uiState: UiState;
-  sendCommand: (cmd: JsCommand) => void;
-  activeAlertId: string | null;
-  dismissAlert: () => void;
+  sendCommand: (cmd: Record<string, unknown>) => void;
+  subscribe: (event: string, handler: (data: string) => void) => () => void;
 }
 
 const WasmContext = createContext<WasmContextValue>({
@@ -112,8 +84,7 @@ const WasmContext = createContext<WasmContextValue>({
   isReady: false,
   uiState: DEFAULT_UI_STATE,
   sendCommand: () => {},
-  activeAlertId: null,
-  dismissAlert: () => {},
+  subscribe: () => () => {},
 });
 
 export function useWasm() {
@@ -125,9 +96,7 @@ export function useWasm() {
 export function WasmProvider({ children }: { children: React.ReactNode }) {
   const [wasm, setWasm] = useState<NexradWasm | null>(null);
   const [uiState, setUiState] = useState<UiState>(DEFAULT_UI_STATE);
-  const [activeAlertId, setActiveAlertId] = useState<string | null>(null);
-  const setActiveAlertIdRef = useRef(setActiveAlertId);
-  setActiveAlertIdRef.current = setActiveAlertId;
+  const subscribersRef = useRef(new Map<string, Set<(data: string) => void>>());
 
   useEffect(() => {
     loadWasm()
@@ -140,20 +109,28 @@ export function WasmProvider({ children }: { children: React.ReactNode }) {
           }
         });
         mod.set_alert_click_callback((alertId: string) => {
-          setActiveAlertIdRef.current(alertId);
+          subscribersRef.current.get("alert_click")?.forEach((h) => h(alertId));
+        });
+        mod.set_site_click_callback((siteId: string) => {
+          subscribersRef.current.get("site_click")?.forEach((h) => h(siteId));
         });
         setWasm(mod);
       })
       .catch((err) => console.error("[WasmContext] WASM failed to load:", err));
   }, []);
 
-  function sendCommand(cmd: JsCommand) {
+  const sendCommand = useCallback((cmd: Record<string, unknown>) => {
     wasmModule?.send_command(JSON.stringify(cmd));
-  }
+  }, []);
 
-  function dismissAlert() {
-    setActiveAlertId(null);
-  }
+  const subscribe = useCallback((event: string, handler: (data: string) => void) => {
+    const subs = subscribersRef.current;
+    if (!subs.has(event)) subs.set(event, new Set());
+    subs.get(event)!.add(handler);
+    return () => {
+      subs.get(event)?.delete(handler);
+    };
+  }, []);
 
   return (
     <WasmContext.Provider
@@ -162,8 +139,7 @@ export function WasmProvider({ children }: { children: React.ReactNode }) {
         isReady: wasm !== null,
         uiState,
         sendCommand,
-        activeAlertId,
-        dismissAlert,
+        subscribe,
       }}
     >
       {children}
