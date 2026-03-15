@@ -137,6 +137,20 @@ export function RadarLayerCard({
               sendCommand({ type: "SetThreshold", layer_id: layer.id, dbz: Number(e.target.value) })
             }
           />
+          <SliderHeader>
+            <SubLabel>Range cap</SubLabel>
+            <SliderValue>{Math.round(layerUiState?.range_km ?? 460)} km</SliderValue>
+          </SliderHeader>
+          <Slider
+            type="range"
+            min={50}
+            max={460}
+            step={10}
+            value={layerUiState?.range_km ?? 460}
+            onChange={(e) =>
+              sendCommand({ type: "SetRangeKm", layer_id: layer.id, range_km: Number(e.target.value) })
+            }
+          />
         </>
       )}
     </LayerCard>

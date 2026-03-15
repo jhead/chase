@@ -32,6 +32,7 @@ export type JsCommand =
   | { type: "RemoveLayer"; layer_id: string }
   | { type: "SetElevationCount"; layer_id: string; count: number }
   | { type: "SetThreshold"; layer_id: string; dbz: number }
+  | { type: "SetRangeKm"; layer_id: string; range_km: number }
   | { type: "SetCameraMode"; mode: "2d" | "3d" }
   | { type: "SetAlerts"; layer_id: string; alerts: AlertPolygonPayload[] }
   | { type: "ClearAlerts"; layer_id: string }
@@ -44,6 +45,7 @@ export interface UiRadarLayerState {
   elevation_count: number;
   elevation_total: number;
   threshold_dbz: number;
+  range_km: number;
 }
 
 /** Serializable state pushed from Bevy to React on meaningful changes. */

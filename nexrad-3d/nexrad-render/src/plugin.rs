@@ -82,6 +82,8 @@ pub enum JsCommand {
     SetElevationCount { layer_id: String, count: u32 },
     /// Set the minimum dBZ threshold for a specific radar layer.
     SetThreshold { layer_id: String, dbz: f32 },
+    /// Set the render range cap (km) for a specific radar layer.
+    SetRangeKm { layer_id: String, range_km: f32 },
     SetCameraMode(CameraMode),
     /// Replace alert polygons for an alerts layer.
     SetAlerts { layer_id: String, alerts: Vec<AlertPolygonData> },
@@ -109,6 +111,11 @@ impl JsCommand {
                 let layer_id = v["layer_id"].as_str().unwrap_or("radar-1").to_string();
                 let dbz = v["dbz"].as_f64()? as f32;
                 Some(JsCommand::SetThreshold { layer_id, dbz })
+            }
+            "SetRangeKm" => {
+                let layer_id = v["layer_id"].as_str().unwrap_or("radar-1").to_string();
+                let range_km = v["range_km"].as_f64()? as f32;
+                Some(JsCommand::SetRangeKm { layer_id, range_km })
             }
             "SetCameraMode" => {
                 let cam_mode = match v["mode"].as_str().unwrap_or("2d") {
@@ -141,14 +148,30 @@ pub struct JsCommandReceiver(pub async_channel::Receiver<JsCommand>);
 
 // ── Per-layer state ───────────────────────────────────────────────────────────
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct RadarLayerState {
     pub elevation_count: u32,
     pub elevation_total: u32,
     pub threshold_dbz: f32,
+    /// Render range cap in km. Fade begins at 75% of this value.
+    pub range_km: f32,
     pub site_world_pos: Vec3,
     pub base_dims: BaseTextureDims,
     pub site_id: Option<String>,
+}
+
+impl Default for RadarLayerState {
+    fn default() -> Self {
+        Self {
+            elevation_count: 0,
+            elevation_total: 0,
+            threshold_dbz: 0.0,
+            range_km: 460.0,
+            site_world_pos: Vec3::ZERO,
+            base_dims: BaseTextureDims::default(),
+            site_id: None,
+        }
+    }
 }
 
 impl RadarLayerState {
@@ -169,6 +192,7 @@ pub struct UiRadarLayerState {
     pub elevation_count: u32,
     pub elevation_total: u32,
     pub threshold_dbz: f32,
+    pub range_km: f32,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -190,6 +214,7 @@ impl UiState {
             elevation_count: s.elevation_count,
             elevation_total: s.elevation_total,
             threshold_dbz: s.threshold_dbz,
+            range_km: s.range_km,
         }).collect();
         self.radar_layers.sort_by(|a, b| a.layer_id.cmp(&b.layer_id));
 
@@ -383,7 +408,12 @@ fn spawn_elevation_entities(
         let texture = create_reflectivity_texture(images, scan);
         let material = materials.add(RadarMaterial {
             reflectivity_texture: texture,
-            params: Vec4::new(layer_state.threshold_dbz, 0.0, 0.0, 0.0),
+            params: Vec4::new(
+                layer_state.threshold_dbz,
+                layer_state.range_km,
+                site_offset.x,
+                site_offset.z,
+            ),
         });
         let visible = (i as u32) < layer_state.elevation_count;
         let mut entity = commands.spawn((
@@ -530,6 +560,20 @@ fn drain_js_commands(
                     if lid.0 == layer_id {
                         if let Some(mat) = radar_materials.get_mut(&handle.0) {
                             mat.params.x = dbz;
+                        }
+                    }
+                }
+                ui_state.0.sync_layers(&layer_states);
+                notifier.notify(&ui_state.0);
+            }
+            JsCommand::SetRangeKm { layer_id, range_km } => {
+                if let Some(s) = layer_states.0.get_mut(&layer_id) {
+                    s.range_km = range_km;
+                }
+                for (handle, lid) in &elev_material_handles {
+                    if lid.0 == layer_id {
+                        if let Some(mat) = radar_materials.get_mut(&handle.0) {
+                            mat.params.y = range_km;
                         }
                     }
                 }
