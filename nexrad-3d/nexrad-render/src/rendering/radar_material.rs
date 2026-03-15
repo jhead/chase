@@ -26,19 +26,3 @@ impl Material for RadarMaterial {
     }
 }
 
-/// Custom material for the derived isosurface mesh.
-/// Uses vertex colors (NWS reflectivity ramp) with per-fragment directional shading.
-/// Double-sided rendering is handled in the WGSL shader (no cull_mode override needed
-/// because the MC mesh has consistent outward-facing winding from MeshSide::OutsideOnly).
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-pub struct IsoSurfaceMaterial {}
-
-impl Material for IsoSurfaceMaterial {
-    fn fragment_shader() -> ShaderRef {
-        "embedded://nexrad_render/rendering/shaders/isosurface.wgsl".into()
-    }
-
-    fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Opaque
-    }
-}

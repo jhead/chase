@@ -2,25 +2,29 @@ use async_channel::Sender;
 use bevy::prelude::*;
 use nexrad_core::types::{ElevationScan, RadarVolume};
 use nexrad_render::{
-    AnimationFrame, AnimationFrameSlot, ExternalVolumeReceiver, JsCommand, JsCommandReceiver,
-    RadarPlugin, StateNotifier, UiState,
+    AnimationFrame, AnimationFrameSlots, ExternalVolumeReceiver, JsCommand, JsCommandReceiver,
+    RadarPlugin, StateNotifier, TaggedVolume, UiState,
 };
-use std::sync::{Arc, OnceLock, RwLock};
+use std::{
+    collections::HashMap,
+    sync::{OnceLock, RwLock},
+};
 use wasm_bindgen::prelude::*;
 
-/// Channel from JS into Bevy: volumes sent here are drained each frame by the plugin.
-static VOLUME_TX: OnceLock<Sender<RadarVolume>> = OnceLock::new();
+/// Channel from JS into Bevy: tagged volumes sent here are drained each frame.
+static VOLUME_TX: OnceLock<Sender<TaggedVolume>> = OnceLock::new();
 
-/// Scans accumulated by add_scan() until commit_volume() sends them as one volume.
-static PENDING_SCANS: OnceLock<RwLock<Vec<ElevationScan>>> = OnceLock::new();
+/// Per-layer scan accumulators: add_scan() appends here, commit_volume() drains and sends.
+static PENDING_SCANS: OnceLock<RwLock<HashMap<String, Vec<ElevationScan>>>> = OnceLock::new();
 
-/// Channel from JS into Bevy: commands sent here are drained each frame by drain_js_commands.
+/// Channel from JS into Bevy: commands sent here are drained each frame.
 static CMD_TX: OnceLock<Sender<JsCommand>> = OnceLock::new();
 
-/// Latest animation frame slot: JS overwrites, Bevy reads once per tick (no queue lag).
-static ANIM_SLOT: OnceLock<Arc<RwLock<Option<AnimationFrame>>>> = OnceLock::new();
+/// Per-layer animation frame slots. Shared Arc between JS and Bevy.
+/// JS writes into a slot keyed by layer_id; Bevy drains each slot once per tick.
+static ANIM_SLOTS: OnceLock<AnimationFrameSlots> = OnceLock::new();
 
-/// JS callback registered via set_state_callback(). Called from the StateNotifier on state change.
+/// JS callback registered via set_state_callback(). Called on state change.
 static STATE_CB: OnceLock<js_sys::Function> = OnceLock::new();
 
 #[wasm_bindgen(start)]
@@ -28,19 +32,19 @@ pub fn run() {
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook::set_once();
 
-    let (vol_tx, vol_rx) = async_channel::unbounded::<RadarVolume>();
+    let (vol_tx, vol_rx) = async_channel::unbounded::<TaggedVolume>();
     let (cmd_tx, cmd_rx) = async_channel::unbounded::<JsCommand>();
-    let anim_slot = Arc::new(RwLock::new(None::<AnimationFrame>));
+    let anim_slots = AnimationFrameSlots::default();
 
     VOLUME_TX.set(vol_tx).ok();
-    PENDING_SCANS.set(RwLock::new(Vec::new())).ok();
+    PENDING_SCANS.set(RwLock::new(HashMap::new())).ok();
     CMD_TX.set(cmd_tx).ok();
-    ANIM_SLOT.set(anim_slot.clone()).ok();
+    ANIM_SLOTS.set(anim_slots.clone()).ok();
 
     App::new()
         .insert_resource(ExternalVolumeReceiver(vol_rx))
         .insert_resource(JsCommandReceiver(cmd_rx))
-        .insert_resource(AnimationFrameSlot(anim_slot))
+        .insert_resource(anim_slots)
         .insert_resource(StateNotifier(Some(Box::new(|state: &UiState| {
             if let Some(cb) = STATE_CB.get() {
                 if let Ok(json) = serde_json::to_string(state) {
@@ -62,14 +66,12 @@ pub fn run() {
 }
 
 /// Register a JS callback to receive UiState updates from Bevy.
-/// Called once after WASM init. The callback receives a JSON string matching UiState.
 #[wasm_bindgen]
 pub fn set_state_callback(cb: js_sys::Function) {
     STATE_CB.set(cb).ok();
 }
 
-/// Send a command to the Bevy renderer. `json` is a JSON-serialized JsCommand discriminated union.
-/// Example: `{"type":"SetRenderMode","mode":"isosurface"}`
+/// Send a command to the Bevy renderer. `json` is a JSON-serialized JsCommand.
 #[wasm_bindgen]
 pub fn send_command(json: &str) {
     if let Some(cmd) = JsCommand::from_json(json) {
@@ -79,10 +81,11 @@ pub fn send_command(json: &str) {
     }
 }
 
-/// Append one elevation scan. Data is row-major: reflectivity[ray * num_gates + gate].
-/// Call from JS after fetching/parsing a sweep (e.g. via nexrad-level-2-data).
+/// Append one elevation scan to the pending buffer for the given layer.
+/// Data is row-major: reflectivity[ray * num_gates + gate].
 #[wasm_bindgen]
 pub fn add_scan(
+    layer_id: &str,
     elevation_angle_deg: f32,
     gate_size_m: f32,
     first_gate_m: f32,
@@ -118,39 +121,44 @@ pub fn add_scan(
 
         if let Some(cell) = PENDING_SCANS.get() {
             if let Ok(mut pending) = cell.write() {
-                pending.push(scan);
+                pending.entry(layer_id.to_string()).or_default().push(scan);
             }
         }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    let _ = (elevation_angle_deg, gate_size_m, first_gate_m, azimuths, reflectivity);
+    let _ = (layer_id, elevation_angle_deg, gate_size_m, first_gate_m, azimuths, reflectivity);
 }
 
-/// Send the accumulated scans as one volume and clear the buffer.
-/// Call from JS after all add_scan() calls for the current volume.
+/// Send the accumulated scans for `layer_id` as one tagged volume, then clear the buffer.
 #[wasm_bindgen]
-pub fn commit_volume(site_id: &str) {
+pub fn commit_volume(layer_id: &str, site_id: &str) {
     if let (Some(tx), Some(cell)) = (VOLUME_TX.get(), PENDING_SCANS.get()) {
         if let Ok(mut pending) = cell.write() {
-            if pending.is_empty() {
+            let scans = pending.entry(layer_id.to_string()).or_default();
+            if scans.is_empty() {
                 return;
             }
             let volume = RadarVolume {
                 site: site_id.to_string(),
-                elevations: std::mem::take(&mut *pending),
+                elevations: std::mem::take(scans),
             };
-            let _ = tx.try_send(volume);
+            let tagged = TaggedVolume {
+                layer_id: layer_id.to_string(),
+                volume,
+            };
+            let _ = tx.try_send(tagged);
         }
     }
 }
 
-/// Update the base elevation (tilt 0) texture in-place for animation.
-/// `data` is pre-quantized R8Unorm (0-255). Called from JS on each animation frame.
-/// Overwrites the shared slot so Bevy always sees the latest frame (no queue lag).
+/// Update the base elevation texture for a specific layer (for animation playback).
+/// `data` is pre-quantized R8Unorm (0-255). Overwrites the slot so Bevy always
+/// sees the latest frame without queue lag.
 #[wasm_bindgen]
-pub fn update_base_texture(num_rays: u32, num_gates: u32, data: &[u8]) {
-    if let Some(slot) = ANIM_SLOT.get() {
+pub fn update_layer_texture(layer_id: &str, num_rays: u32, num_gates: u32, data: &[u8]) {
+    if let Some(slots) = ANIM_SLOTS.get() {
+        let slot = slots.slot_for(layer_id);
         if let Ok(mut g) = slot.write() {
             *g = Some(AnimationFrame {
                 num_rays: num_rays as usize,

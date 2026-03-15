@@ -5,8 +5,8 @@ pub mod rendering;
 
 pub use basemap::BasemapConfig;
 pub use plugin::{
-    AnimationFrame, AnimationFrameSlot, BaseTextureDims,
-    ElevationCount, ExternalVolumeReceiver, IsoSurfaceChannel, JsCommand, JsCommandReceiver,
-    LoadStatus, RadarPlugin, RadarVolumeSender, RenderMode, StateNotifier, UiState,
+    AnimationFrame, AnimationFrameSlots, TaggedVolume,
+    ExternalVolumeReceiver, JsCommand, JsCommandReceiver,
+    LoadStatus, RadarPlugin, RadarVolumeSender, StateNotifier, UiState,
 };
-pub use rendering::radar_material::{IsoSurfaceMaterial, RadarMaterial};
+pub use rendering::radar_material::RadarMaterial;

@@ -1,51 +1,42 @@
 import { useState } from "react";
 import styled from "@emotion/styled";
-import { RADAR_SITES } from "../../data/radarSites";
 import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
-import type { AnimationState } from "../../hooks/useRadarAnimation";
-
-const PRODUCTS = [
-  { id: "REF", label: "Reflectivity", available: true },
-  { id: "VEL", label: "Velocity",     available: false },
-  { id: "CC",  label: "Corr. Coeff.", available: false },
-  { id: "ZDR", label: "Diff. Refl.",  available: false },
-];
+import type { AnimationState } from "../../hooks/useMultiLayerAnimation";
+import type { Layer, AlertsLayer, RadarLayer, Product } from "../../hooks/useLayers";
+import { LayerCard } from "./LayerCard";
+import { RadarLayerCard } from "./RadarLayerCard";
 
 interface SidebarProps {
   animationState: AnimationState;
   onSetSpeed: (speed: number) => void;
   onToggleLoop: () => void;
-  onSelectSite: (siteId: string) => void;
+  onSelectSite: (layerId: string, siteId: string) => void;
+  layers: Layer[];
+  addLayer: (kind: "radar") => void;
+  removeLayer: (id: string) => void;
+  updateLayer: <T extends Layer>(id: string, updates: Partial<T>) => void;
 }
 
-export function Sidebar({ animationState, onSetSpeed, onToggleLoop, onSelectSite }: SidebarProps) {
+export function Sidebar({
+  animationState,
+  onSetSpeed,
+  onToggleLoop,
+  onSelectSite,
+  layers,
+  addLayer,
+  removeLayer,
+  updateLayer,
+}: SidebarProps) {
   const [expanded, setExpanded] = useState(true);
-  const [search, setSearch] = useState("");
-  const [activeProduct, setActiveProduct] = useState("REF");
   const { uiState, sendCommand } = useWasm();
 
-  const filtered = search.length >= 1
-    ? RADAR_SITES.filter(
-        (s) =>
-          s.id.toLowerCase().includes(search.toLowerCase()) ||
-          s.name.toLowerCase().includes(search.toLowerCase())
-      ).slice(0, 12)
-    : [];
-
-  function selectSite(siteId: string) {
-    setSearch("");
-    onSelectSite(siteId);
-  }
+  const radarLayers = layers.filter((l): l is RadarLayer => l.kind === "radar");
 
   if (!expanded) {
     return (
       <Collapsed>
-        <CollapseBtn title="Expand sidebar" onClick={() => setExpanded(true)}>
-          ›
-        </CollapseBtn>
-        <IconStub title="Site">📡</IconStub>
-        <IconStub title="Product">🌀</IconStub>
+        <CollapseBtn title="Expand sidebar" onClick={() => setExpanded(true)}>›</CollapseBtn>
         <IconStub title="Layers">🗂</IconStub>
       </Collapsed>
     );
@@ -55,102 +46,51 @@ export function Sidebar({ animationState, onSetSpeed, onToggleLoop, onSelectSite
     <Panel>
       <CollapseRow>
         <SectionLabel>Controls</SectionLabel>
-        <CollapseBtn title="Collapse sidebar" onClick={() => setExpanded(false)}>
-          ‹
-        </CollapseBtn>
+        <CollapseBtn title="Collapse sidebar" onClick={() => setExpanded(false)}>‹</CollapseBtn>
       </CollapseRow>
 
-      {/* Site */}
-      <Section>
-        <SectionLabel>Site</SectionLabel>
-        <ActiveSite>{uiState.active_site ?? "None selected"}</ActiveSite>
-        <SearchInput
-          placeholder="Search ID or name…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        {filtered.length > 0 && (
-          <SiteList>
-            {filtered.map((site) => (
-              <SiteItem key={site.id} onClick={() => selectSite(site.id)}>
-                <SiteId>{site.id}</SiteId>
-                <SiteName>{site.name}</SiteName>
-              </SiteItem>
-            ))}
-          </SiteList>
-        )}
-      </Section>
-
-      {/* Product */}
-      <Section>
-        <SectionLabel>Product</SectionLabel>
-        <ProductGrid>
-          {PRODUCTS.map(({ id, label, available }) => (
-            <ProductBtn
-              key={id}
-              active={activeProduct === id}
-              disabled={!available}
-              title={available ? label : `${label} — coming soon`}
-              onClick={() => available && setActiveProduct(id)}
-            >
-              {id}
-            </ProductBtn>
-          ))}
-        </ProductGrid>
-      </Section>
-
-      {/* Layers — mirrors CanvasButtons for users who prefer sidebar */}
+      {/* Layers */}
       <Section>
         <SectionLabel>Layers</SectionLabel>
-        <LayerRow
-          active={uiState.render_mode === "sweeps" || uiState.render_mode === "combined"}
-        >
-          Elevation Sweeps
-        </LayerRow>
-        <LayerRow
-          active={uiState.render_mode === "isosurface" || uiState.render_mode === "combined"}
-        >
-          IsoSurface
-        </LayerRow>
-      </Section>
 
-      {/* Elevation tilt count */}
-      {uiState.elevation_total > 0 && (
-        <Section>
-          <SliderHeader>
-            <SectionLabel>Tilts</SectionLabel>
-            <SliderValue>
-              {uiState.elevation_count} / {uiState.elevation_total}
-            </SliderValue>
-          </SliderHeader>
-          <Slider
-            type="range"
-            min={1}
-            max={uiState.elevation_total}
-            value={uiState.elevation_count}
-            onChange={(e) =>
-              sendCommand({ type: "SetElevationCount", count: Number(e.target.value) })
-            }
-          />
-        </Section>
-      )}
+        {radarLayers.map((layer) => {
+          const layerUiState = uiState.radar_layers.find((s) => s.layer_id === layer.id) ?? null;
+          return (
+            <RadarLayerCard
+              key={layer.id}
+              layer={layer}
+              layerUiState={layerUiState}
+              canRemove={radarLayers.length > 1}
+              onToggle={() => updateLayer(layer.id, { enabled: !layer.enabled })}
+              onRemove={() => {
+                removeLayer(layer.id);
+                sendCommand({ type: "RemoveLayer", layer_id: layer.id });
+              }}
+              onSiteSelect={(siteId) => {
+                updateLayer(layer.id, { siteId });
+                onSelectSite(layer.id, siteId);
+              }}
+              onProductChange={(product: Product) => updateLayer(layer.id, { product })}
+            />
+          );
+        })}
 
-      {/* Reflectivity threshold */}
-      <Section>
-        <SliderHeader>
-          <SectionLabel>Min dBZ</SectionLabel>
-          <SliderValue>{Math.round(uiState.threshold_dbz)} dBZ</SliderValue>
-        </SliderHeader>
-        <Slider
-          type="range"
-          min={-10}
-          max={75}
-          step={1}
-          value={uiState.threshold_dbz}
-          onChange={(e) =>
-            sendCommand({ type: "SetThreshold", dbz: Number(e.target.value) })
-          }
-        />
+        <AddLayerBtn onClick={() => addLayer("radar")}>+ Radar</AddLayerBtn>
+
+        <LayerDivider />
+
+        {/* NWS Alerts */}
+        {layers
+          .filter((l): l is AlertsLayer => l.kind === "nws-alerts")
+          .map((layer) => (
+            <LayerCard
+              key={layer.id}
+              label="NWS Alerts"
+              enabled={false}
+              onToggle={() => {}}
+              disabled
+            />
+          ))}
       </Section>
 
       {/* Animation */}
@@ -158,7 +98,7 @@ export function Sidebar({ animationState, onSetSpeed, onToggleLoop, onSelectSite
         <Section>
           <SectionLabel>Animation</SectionLabel>
           <SliderHeader>
-            <SectionLabel style={{ fontSize: "11px", textTransform: "none" }}>Speed</SectionLabel>
+            <SubLabel>Speed</SubLabel>
             <SliderValue>{animationState.speed}×</SliderValue>
           </SliderHeader>
           <Slider
@@ -187,6 +127,8 @@ export function Sidebar({ animationState, onSetSpeed, onToggleLoop, onSelectSite
     </Panel>
   );
 }
+
+// ── Styled components ─────────────────────────────────────────────────────────
 
 const PANEL_W = "220px";
 const COLLAPSED_W = "36px";
@@ -264,84 +206,32 @@ const SectionLabel = styled.span`
   color: ${theme.textDim};
 `;
 
-const ActiveSite = styled.div`
-  font-family: ${theme.fontMono};
-  font-size: 13px;
-  font-weight: 600;
-  color: ${theme.textPrimary};
-  letter-spacing: 0.05em;
-`;
-
-const SearchInput = styled.input`
-  background: rgba(255,255,255,0.05);
-  border: 1px solid ${theme.border};
-  border-radius: ${theme.radius};
-  color: ${theme.textPrimary};
+const SubLabel = styled.span`
   font-family: ${theme.fontSans};
-  font-size: 12px;
-  padding: 4px 8px;
-  outline: none;
-  &::placeholder { color: ${theme.textDim}; }
-  &:focus { border-color: ${theme.accent}; }
+  font-size: 10px;
+  color: ${theme.textSecondary};
 `;
 
-const SiteList = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  max-height: 180px;
-  overflow-y: auto;
+const LayerDivider = styled.div`
+  height: 1px;
+  background: ${theme.border};
+  margin: 2px 0;
 `;
 
-const SiteItem = styled.button`
+const AddLayerBtn = styled.button`
   background: none;
-  border: none;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 4px 6px;
+  border: 1px dashed ${theme.border};
   border-radius: ${theme.radius};
-  cursor: pointer;
-  text-align: left;
-  &:hover { background: ${theme.bgHover}; }
-`;
-
-const SiteId = styled.span`
-  font-family: ${theme.fontMono};
-  font-size: 12px;
-  font-weight: 600;
-  color: ${theme.accent};
-  flex-shrink: 0;
-`;
-
-const SiteName = styled.span`
+  color: ${theme.textDim};
   font-family: ${theme.fontSans};
   font-size: 11px;
-  color: ${theme.textSecondary};
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-`;
-
-const ProductGrid = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-`;
-
-const ProductBtn = styled.button<{ active?: boolean; disabled?: boolean }>`
-  background: ${({ active }) => active ? theme.bgActive : "rgba(255,255,255,0.04)"};
-  border: 1px solid ${({ active }) => active ? theme.accent : theme.border};
-  border-radius: ${theme.radius};
-  color: ${({ active, disabled }) =>
-    disabled ? theme.textDim : active ? theme.accent : theme.textSecondary};
-  font-family: ${theme.fontMono};
-  font-size: 12px;
-  font-weight: 600;
-  padding: 5px;
-  cursor: ${({ disabled }) => disabled ? "default" : "pointer"};
-  opacity: ${({ disabled }) => disabled ? 0.4 : 1};
-  &:hover:not(:disabled) { border-color: ${theme.accentHover}; }
+  padding: 4px 8px;
+  cursor: pointer;
+  text-align: left;
+  &:hover {
+    border-color: ${theme.accent};
+    color: ${theme.accent};
+  }
 `;
 
 const SliderHeader = styled.div`
@@ -390,17 +280,4 @@ const FrameCountLabel = styled.span`
   font-family: ${theme.fontMono};
   font-size: 10px;
   color: ${theme.textDim};
-`;
-
-const LayerRow = styled.div<{ active?: boolean }>`
-  font-family: ${theme.fontSans};
-  font-size: 12px;
-  color: ${({ active }) => active ? theme.textPrimary : theme.textDim};
-  padding: 2px 0;
-  &::before {
-    content: "${({ active }) => active ? "●" : "○"}";
-    margin-right: 6px;
-    color: ${({ active }) => active ? theme.accent : theme.textDim};
-    font-size: 8px;
-  }
 `;
