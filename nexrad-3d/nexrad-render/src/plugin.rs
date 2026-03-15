@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use bevy::picking::prelude::{MeshPickingPlugin, Pointer};
+use bevy::picking::prelude::Pointer;
 use bevy::picking::events::Click;
 
 use crate::{
@@ -308,7 +308,6 @@ impl Plugin for RadarPlugin {
             .init_resource::<RadarLayerStates>()
             .add_plugins(BasemapPlugin)
             .add_plugins(OrbitCameraPlugin)
-            .add_plugins(MeshPickingPlugin)
             .add_plugins(MaterialPlugin::<RadarMaterial>::default())
             .add_plugins(RadarSitesPlugin)
             .add_systems(Startup, setup_scene_lighting)
