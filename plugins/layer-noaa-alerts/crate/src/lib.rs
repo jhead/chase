@@ -3,14 +3,15 @@
 //! Receives alert commands via the unified `RawCommand` bus, spawns flat
 //! triangulated meshes, and emits `PluginEvent`s when an alert polygon is clicked.
 
+pub mod alert_material;
 pub mod alert_mesh;
 
-use bevy::prelude::*;
+use bevy::{asset::embedded_asset, prelude::*};
 use nexrad_core::geo;
 use nexrad_render::{PluginEvent, RawCommand};
 use serde::Deserialize;
 
-use crate::alert_mesh::build_alert_mesh;
+use crate::{alert_material::AlertMaterial, alert_mesh::build_alert_mesh};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -77,7 +78,10 @@ pub struct NoaaAlertsPlugin;
 
 impl Plugin for NoaaAlertsPlugin {
     fn build(&self, app: &mut App) {
+        embedded_asset!(app, "shaders/alert.wgsl");
+
         app.add_plugins(MeshPickingPlugin)
+            .add_plugins(MaterialPlugin::<AlertMaterial>::default())
             .insert_resource(MeshPickingSettings {
                 require_markers: true,
                 ..default()
@@ -93,7 +97,7 @@ fn receive_alert_data(
     mut commands: Commands,
     mut raw_commands: MessageReader<RawCommand>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<AlertMaterial>>,
     alert_entities: Query<(Entity, &AlertLayerId), With<AlertPolygon>>,
 ) {
     for raw in raw_commands.read() {
@@ -149,16 +153,13 @@ fn receive_alert_data(
                     let mesh_handle = meshes.add(mesh);
 
                     let [r, g, b, a] = alert.color;
-                    let material = materials.add(StandardMaterial {
-                        base_color: Color::srgba(r, g, b, a),
-                        alpha_mode: AlphaMode::Blend,
-                        unlit: true,
-                        ..default()
+                    let material = materials.add(AlertMaterial {
+                        color: Vec4::new(r, g, b, a),
                     });
 
                     commands.spawn((
                         Mesh3d(mesh_handle),
-                        MeshMaterial3d(material),
+                        MeshMaterial3d::<AlertMaterial>(material),
                         Transform::default(),
                         Visibility::Visible,
                         Pickable::default(),
