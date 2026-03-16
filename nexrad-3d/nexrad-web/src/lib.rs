@@ -11,7 +11,7 @@ use wasm_bindgen_futures::future_to_promise;
 // Engine
 use nexrad_render::{
     EngineCommand, EngineCommandReceiver, EnginePlugin,
-    SiteClickNotifier,
+    SiteClickNotifier, SiteRegistry,
 };
 
 // Plugins
@@ -23,7 +23,7 @@ use layer_radar_l2::{
     state::{StateNotifier, UiState},
 };
 use layer_noaa_alerts::{AlertCommand, AlertCommandReceiver, NoaaAlertsPlugin, AlertClickCallback};
-use layer_radar_sites::RadarSitesPlugin;
+use layer_radar_sites::{RadarSitesPlugin, RadarSitesCommand, RadarSitesCommandReceiver};
 
 // ── Static channels ─────────────────────────────────────────────────────────
 
@@ -44,6 +44,9 @@ static RADAR_CMD_TX: OnceLock<Sender<RadarL2Command>> = OnceLock::new();
 
 /// Alert command channel.
 static ALERT_CMD_TX: OnceLock<Sender<AlertCommand>> = OnceLock::new();
+
+/// Radar sites command channel.
+static SITES_CMD_TX: OnceLock<Sender<RadarSitesCommand>> = OnceLock::new();
 
 /// JS callback registered via set_state_callback().
 static STATE_CB: OnceLock<js_sys::Function> = OnceLock::new();
@@ -82,6 +85,10 @@ pub fn run() {
     let (alert_cmd_tx, alert_cmd_rx) = async_channel::unbounded::<AlertCommand>();
     ALERT_CMD_TX.set(alert_cmd_tx).ok();
 
+    // Radar sites command channel
+    let (sites_cmd_tx, sites_cmd_rx) = async_channel::unbounded::<RadarSitesCommand>();
+    SITES_CMD_TX.set(sites_cmd_tx).ok();
+
     App::new()
         // Engine resources
         .insert_resource(EngineCommandReceiver(engine_cmd_rx))
@@ -98,6 +105,9 @@ pub fn run() {
         }))))
         // Alert resources
         .insert_resource(AlertCommandReceiver(alert_cmd_rx))
+        // Radar sites resources
+        .insert_resource(RadarSitesCommandReceiver(sites_cmd_rx))
+        .init_resource::<SiteRegistry>()
         .insert_resource(AlertClickCallback(Some(Box::new(|alert_id: &str| {
             if let Some(cb) = ALERT_CLICK_CB.get() {
                 let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(alert_id));
@@ -182,6 +192,14 @@ pub fn send_command(json: &str) {
     // Try alert commands
     if let Some(cmd) = AlertCommand::from_json(&v) {
         if let Some(tx) = ALERT_CMD_TX.get() {
+            let _ = tx.try_send(cmd);
+        }
+        return;
+    }
+
+    // Try radar sites commands
+    if let Some(cmd) = RadarSitesCommand::from_json(&v) {
+        if let Some(tx) = SITES_CMD_TX.get() {
             let _ = tx.try_send(cmd);
         }
         return;

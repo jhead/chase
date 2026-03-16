@@ -3716,10 +3716,12 @@ dependencies = [
 name = "layer-radar-sites"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "bevy",
  "log",
  "nexrad-core",
  "nexrad-render",
+ "serde_json",
 ]
 
 [[package]]

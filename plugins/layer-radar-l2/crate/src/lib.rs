@@ -5,7 +5,7 @@ pub mod elevation_mesh;
 pub mod state;
 
 use bevy::{asset::embedded_asset, prelude::*};
-use nexrad_core::{sites::RadarSite, types::ElevationScan};
+use nexrad_core::types::ElevationScan;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
@@ -13,7 +13,7 @@ use std::{
 
 use nexrad_render::camera::orbit_camera::OrbitCamera;
 
-use nexrad_render::OverlayLayerId;
+use nexrad_render::{OverlayLayerId, SiteRegistry};
 use crate::{
     commands::RadarL2Command,
     elevation_mesh::build_elevation_mesh,
@@ -223,6 +223,7 @@ fn receive_radar_data(
     mut ui_state: ResMut<UiStateResource>,
     mut camera: Query<&mut OrbitCamera>,
     mut layer_states: ResMut<RadarLayerStates>,
+    site_registry: Res<SiteRegistry>,
 ) {
     let Ok(tagged) = channel.0.try_recv() else { return };
     let TaggedVolume { layer_id, volume } = tagged;
@@ -233,12 +234,13 @@ fn receive_radar_data(
         }
     }
 
-    let offset = if let Some(site) = RadarSite::lookup(&volume.site) {
+    let offset = if let Some((lat, lng)) = site_registry.lookup(&volume.site) {
         let (x, _, z) = nexrad_core::geo::wgs84_to_bevy(
-            site.lat, site.lng, WORLD_ORIGIN_LAT, WORLD_ORIGIN_LNG,
+            lat, lng, WORLD_ORIGIN_LAT, WORLD_ORIGIN_LNG,
         );
         Vec3::new(x, 0.0, z)
     } else {
+        log::warn!("radar-l2: site '{}' not found in SiteRegistry", volume.site);
         Vec3::ZERO
     };
 
