@@ -5,6 +5,7 @@ members = [
     "nexrad-3d/nexrad-render",
     "nexrad-3d/nexrad-cli",
     "nexrad-3d/nexrad-web",
+    "nexrad-3d/nexrad-worker",
     "plugins/layer-basemap/crate",
     "plugins/layer-radar-l2/crate",
     "plugins/layer-noaa-alerts/crate",

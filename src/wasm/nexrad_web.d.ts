@@ -13,6 +13,13 @@ export function add_scan(layer_id: string, elevation_angle_deg: number, gate_siz
 export function apply_frame(layer_id: string, key: string): void;
 
 /**
+ * Receive a postcard-encoded `RadarVolume` from the fetch worker and store its
+ * first elevation in the frame cache for later playback via `apply_frame`.
+ * This replaces `load_frame`.
+ */
+export function cache_radar_frame(layer_id: string, key: string, bytes: Uint8Array): void;
+
+/**
  * Remove all cached frames for `layer_id` (call when tearing down a layer).
  */
 export function clear_frame_cache(layer_id: string): void;
@@ -29,17 +36,11 @@ export function commit_volume(layer_id: string, site_id: string): void;
 export function list_radar_frames(site: string, date: string): Promise<any>;
 
 /**
- * Fetch and parse one animation frame for `layer_id`, storing it in the internal
- * frame cache. Call `apply_frame` to display it. JS tracks which frames are ready.
+ * Receive a postcard-encoded `RadarVolume` from the fetch worker, apply the first
+ * elevation as the initial animation frame, and send the volume to the renderer to
+ * create the 3D mesh. This replaces `load_initial_frame`.
  */
-export function load_frame(layer_id: string, key: string): Promise<any>;
-
-/**
- * Fetch, parse, and apply the initial radar frame for `layer_id`.
- * Stores the frame in cache, writes to the animation slot, and sends the
- * RadarVolume to the renderer to create the 3D mesh.
- */
-export function load_initial_frame(layer_id: string, key: string, site_id: string): Promise<any>;
+export function receive_radar_volume(layer_id: string, key: string, site_id: string, bytes: Uint8Array): void;
 
 export function run(): void;
 

@@ -7,8 +7,8 @@ export const add_scan: (a: number, b: number, c: number, d: number, e: number, f
 export const commit_volume: (a: number, b: number, c: number, d: number) => void;
 export const update_layer_texture: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
 export const list_radar_frames: (a: number, b: number, c: number, d: number) => any;
-export const load_frame: (a: number, b: number, c: number, d: number) => any;
-export const load_initial_frame: (a: number, b: number, c: number, d: number, e: number, f: number) => any;
+export const receive_radar_volume: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];
+export const cache_radar_frame: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const apply_frame: (a: number, b: number, c: number, d: number) => void;
 export const clear_frame_cache: (a: number, b: number) => void;
 export const set_event_callback: (a: any) => void;

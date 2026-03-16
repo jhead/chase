@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "build:wasm": "cargo build --release --target wasm32-unknown-unknown -p nexrad-web && wasm-bindgen --target bundler --out-dir src/wasm target/wasm32-unknown-unknown/release/nexrad_web*.wasm"
+    "build:wasm": "cargo build --release --target wasm32-unknown-unknown -p nexrad-worker && wasm-bindgen --target bundler --out-dir src/wasm-worker target/wasm32-unknown-unknown/release/nexrad_worker.wasm && cargo build --release --target wasm32-unknown-unknown -p nexrad-web && wasm-bindgen --target bundler --out-dir src/wasm target/wasm32-unknown-unknown/release/nexrad_web.wasm"
   },
   "dependencies": {
     "@emotion/react": "^11.11.4",

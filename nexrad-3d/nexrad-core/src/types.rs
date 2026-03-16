@@ -1,5 +1,5 @@
 /// A single elevation scan (one tilt of the radar antenna).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ElevationScan {
     pub elevation_angle: f32, // degrees above horizon (e.g. 0.5, 1.5, 2.4...)
     pub num_rays: usize,
@@ -81,7 +81,7 @@ impl ElevationScan {
 }
 
 /// A full volume scan containing multiple elevation sweeps.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct RadarVolume {
     pub site: String,
     pub elevations: Vec<ElevationScan>,

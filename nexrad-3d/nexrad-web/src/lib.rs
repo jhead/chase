@@ -287,73 +287,64 @@ pub fn list_radar_frames(site: String, date: String) -> js_sys::Promise {
     })
 }
 
-/// Fetch and parse one animation frame for `layer_id`, storing it in the internal
-/// frame cache. Call `apply_frame` to display it. JS tracks which frames are ready.
+/// Receive a postcard-encoded `RadarVolume` from the fetch worker, apply the first
+/// elevation as the initial animation frame, and send the volume to the renderer to
+/// create the 3D mesh. This replaces `load_initial_frame`.
 #[wasm_bindgen]
-pub fn load_frame(layer_id: String, key: String) -> js_sys::Promise {
-    future_to_promise(async move {
-        let bytes = nexrad_fetch::fetch_radar_file(&key)
-            .await
-            .map_err(|e| JsValue::from_str(&e))?;
+pub fn receive_radar_volume(
+    layer_id: String,
+    key: String,
+    site_id: String,
+    bytes: &[u8],
+) -> Result<(), JsValue> {
+    let mut volume: RadarVolume = postcard::from_bytes(bytes)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-        let volume = nexrad_core::parser::parse_volume(&key, bytes)
-            .map_err(|e| JsValue::from_str(&e))?;
+    if volume.elevations.is_empty() {
+        return Err(JsValue::from_str("no elevation scans in volume"));
+    }
 
-        if volume.elevations.is_empty() {
-            return Err(JsValue::from_str("no elevation scans in volume"));
+    let elev = volume.elevations.remove(0);
+    let frame = elevation_to_frame(&elev);
+
+    store_frame(&layer_id, &key, frame.clone());
+    if let Some(slots) = ANIM_SLOTS.get() {
+        let slot = slots.slot_for(&layer_id);
+        if let Ok(mut g) = slot.write() {
+            *g = Some(frame);
         }
+    }
 
-        let frame = elevation_to_frame(&volume.elevations[0]);
-        store_frame(&layer_id, &key, frame);
+    let tagged = TaggedVolume {
+        layer_id: layer_id.clone(),
+        volume: RadarVolume {
+            site: site_id,
+            elevations: vec![elev],
+        },
+    };
+    if let Some(tx) = VOLUME_TX.get() {
+        let _ = tx.try_send(tagged);
+    }
 
-        Ok(JsValue::UNDEFINED)
-    })
+    Ok(())
 }
 
-/// Fetch, parse, and apply the initial radar frame for `layer_id`.
-/// Stores the frame in cache, writes to the animation slot, and sends the
-/// RadarVolume to the renderer to create the 3D mesh.
+/// Receive a postcard-encoded `RadarVolume` from the fetch worker and store its
+/// first elevation in the frame cache for later playback via `apply_frame`.
+/// This replaces `load_frame`.
 #[wasm_bindgen]
-pub fn load_initial_frame(layer_id: String, key: String, site_id: String) -> js_sys::Promise {
-    future_to_promise(async move {
-        let bytes = nexrad_fetch::fetch_radar_file(&key)
-            .await
-            .map_err(|e| JsValue::from_str(&e))?;
+pub fn cache_radar_frame(layer_id: String, key: String, bytes: &[u8]) -> Result<(), JsValue> {
+    let volume: RadarVolume = postcard::from_bytes(bytes)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-        let mut volume = nexrad_core::parser::parse_volume(&site_id, bytes)
-            .map_err(|e| JsValue::from_str(&e))?;
+    if volume.elevations.is_empty() {
+        return Err(JsValue::from_str("no elevation scans in volume"));
+    }
 
-        if volume.elevations.is_empty() {
-            return Err(JsValue::from_str("no elevation scans in volume"));
-        }
+    let frame = elevation_to_frame(&volume.elevations[0]);
+    store_frame(&layer_id, &key, frame);
 
-        let elev = volume.elevations.remove(0);
-        let frame = elevation_to_frame(&elev);
-
-        // Store in cache and apply immediately
-        store_frame(&layer_id, &key, frame.clone());
-        if let Some(slots) = ANIM_SLOTS.get() {
-            let slot = slots.slot_for(&layer_id);
-            if let Ok(mut g) = slot.write() {
-                *g = Some(frame);
-            }
-        }
-
-        // Send volume to renderer (creates 3D mesh)
-        let radar_volume = RadarVolume {
-            site: site_id.clone(),
-            elevations: vec![elev],
-        };
-        let tagged = TaggedVolume {
-            layer_id: layer_id.clone(),
-            volume: radar_volume,
-        };
-        if let Some(tx) = VOLUME_TX.get() {
-            let _ = tx.try_send(tagged);
-        }
-
-        Ok(JsValue::UNDEFINED)
-    })
+    Ok(())
 }
 
 /// Apply a previously loaded frame (by S3 key) to the animation slot for `layer_id`.
