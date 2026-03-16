@@ -3689,7 +3689,6 @@ dependencies = [
 name = "layer-noaa-alerts"
 version = "0.1.0"
 dependencies = [
- "async-channel",
  "bevy",
  "earcutr",
  "log",
@@ -3705,6 +3704,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "bevy",
+ "layer-radar-sites",
  "log",
  "nexrad-core",
  "nexrad-render",
@@ -3716,7 +3716,6 @@ dependencies = [
 name = "layer-radar-sites"
 version = "0.1.0"
 dependencies = [
- "async-channel",
  "bevy",
  "log",
  "nexrad-core",

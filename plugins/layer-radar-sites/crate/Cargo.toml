@@ -9,4 +9,3 @@ nexrad-core = { path = "../../../nexrad-3d/nexrad-core" }
 bevy = "0.18.1"
 log = "0.4"
 serde_json = "1"
-async-channel = "2"

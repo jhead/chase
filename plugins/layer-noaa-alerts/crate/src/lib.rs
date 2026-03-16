@@ -1,13 +1,13 @@
 //! `layer-noaa-alerts` — Bevy plugin for rendering NWS alert polygons.
 //!
-//! Extracted from `nexrad-render/src/alerts.rs`.  Receives [`AlertCommand`]s
-//! over an async channel, spawns flat triangulated meshes, and fires a callback
-//! when an alert polygon is clicked.
+//! Receives alert commands via the unified `RawCommand` bus, spawns flat
+//! triangulated meshes, and emits `PluginEvent`s when an alert polygon is clicked.
 
 pub mod alert_mesh;
 
 use bevy::prelude::*;
 use nexrad_core::geo;
+use nexrad_render::{PluginEvent, RawCommand};
 use serde::Deserialize;
 
 use crate::alert_mesh::build_alert_mesh;
@@ -57,22 +57,6 @@ impl AlertCommand {
     }
 }
 
-// ── Resources ────────────────────────────────────────────────────────────────
-
-/// Sender half — hand this to whatever produces alert commands.
-#[derive(Resource)]
-pub struct AlertCommandSender(pub async_channel::Sender<AlertCommand>);
-
-/// Receiver half — consumed by [`NoaaAlertsPlugin`] systems.
-#[derive(Resource)]
-pub struct AlertCommandReceiver(pub async_channel::Receiver<AlertCommand>);
-
-/// Callback invoked when the user clicks an alert polygon.
-///
-/// Set the inner `Option` to receive click notifications with the alert id.
-#[derive(Resource, Default)]
-pub struct AlertClickCallback(pub Option<Box<dyn Fn(&str) + Send + Sync>>);
-
 // ── Components ───────────────────────────────────────────────────────────────
 
 /// Marker for spawned alert polygon entities.
@@ -98,7 +82,6 @@ impl Plugin for NoaaAlertsPlugin {
                 require_markers: true,
                 ..default()
             })
-            .init_resource::<AlertClickCallback>()
             .add_systems(Update, receive_alert_data)
             .add_systems(Update, on_alert_click);
     }
@@ -108,12 +91,13 @@ impl Plugin for NoaaAlertsPlugin {
 
 fn receive_alert_data(
     mut commands: Commands,
-    receiver: Res<AlertCommandReceiver>,
+    mut raw_commands: MessageReader<RawCommand>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     alert_entities: Query<(Entity, &AlertLayerId), With<AlertPolygon>>,
 ) {
-    while let Ok(cmd) = receiver.0.try_recv() {
+    for raw in raw_commands.read() {
+        let Some(cmd) = AlertCommand::from_json(&raw.0) else { continue };
         match cmd {
             AlertCommand::ClearAlerts { layer_id } => {
                 for (entity, lid) in &alert_entities {
@@ -197,13 +181,15 @@ fn receive_alert_data(
 
 fn on_alert_click(
     mut click_events: MessageReader<Pointer<Click>>,
-    callback: Res<AlertClickCallback>,
+    mut events: MessageWriter<PluginEvent>,
     query: Query<&AlertId, With<AlertPolygon>>,
 ) {
-    let Some(cb) = &callback.0 else { return };
     for event in click_events.read() {
         if let Ok(alert_id) = query.get(event.entity) {
-            cb(alert_id.0.as_str());
+            events.write(PluginEvent {
+                name: "alert_click".into(),
+                data: alert_id.0.clone(),
+            });
         }
     }
 }

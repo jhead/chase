@@ -90,15 +90,4 @@ impl UiState {
 }
 
 #[derive(Resource, Default)]
-pub struct StateNotifier(pub Option<Box<dyn Fn(&UiState) + Send + Sync>>);
-
-impl StateNotifier {
-    pub fn notify(&self, state: &UiState) {
-        if let Some(f) = &self.0 {
-            f(state);
-        }
-    }
-}
-
-#[derive(Resource, Default)]
 pub struct UiStateResource(pub UiState);

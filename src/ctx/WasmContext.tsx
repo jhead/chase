@@ -13,9 +13,7 @@ export interface NexradWasm {
   ) => void;
   commit_volume: (layer_id: string, site_id: string) => void;
   send_command: (json: string) => void;
-  set_state_callback: (cb: (stateJson: string) => void) => void;
-  set_alert_click_callback: (cb: (alertId: string) => void) => void;
-  set_site_click_callback: (cb: (siteId: string) => void) => void;
+  set_event_callback: (cb: (eventJson: string) => void) => void;
   update_layer_texture: (layer_id: string, num_rays: number, num_gates: number, data: Uint8Array) => void;
   // Direct S3 fetch/parse
   list_radar_frames: (site: string, date: string) => Promise<string>;
@@ -107,18 +105,20 @@ export function WasmProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     loadWasm()
       .then((mod) => {
-        mod.set_state_callback((stateJson: string) => {
+        mod.set_event_callback((eventJson: string) => {
           try {
-            setUiState(JSON.parse(stateJson) as UiState);
+            const { name, data } = JSON.parse(eventJson);
+            if (name === "state_update") {
+              try {
+                setUiState(JSON.parse(data) as UiState);
+              } catch {
+                console.error("[WasmContext] Failed to parse UiState data:", data);
+              }
+            }
+            subscribersRef.current.get(name)?.forEach((h) => h(data));
           } catch {
-            console.error("[WasmContext] Failed to parse UiState:", stateJson);
+            console.error("[WasmContext] Failed to parse PluginEvent:", eventJson);
           }
-        });
-        mod.set_alert_click_callback((alertId: string) => {
-          subscribersRef.current.get("alert_click")?.forEach((h) => h(alertId));
-        });
-        mod.set_site_click_callback((siteId: string) => {
-          subscribersRef.current.get("site_click")?.forEach((h) => h(siteId));
         });
         setWasm(mod);
       })

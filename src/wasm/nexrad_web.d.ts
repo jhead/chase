@@ -45,15 +45,12 @@ export function run(): void;
 
 /**
  * Send a command to the renderer. `json` is a JSON-serialized command.
- * Commands are routed to the appropriate plugin based on the `type` field.
+ * Commands are broadcast as `RawCommand` Bevy messages; each plugin
+ * parses what it recognizes.
  */
 export function send_command(json: string): void;
 
-export function set_alert_click_callback(cb: Function): void;
-
-export function set_site_click_callback(cb: Function): void;
-
-export function set_state_callback(cb: Function): void;
+export function set_event_callback(cb: Function): void;
 
 /**
  * Update the base elevation texture for a specific layer (for animation playback).

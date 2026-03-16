@@ -12,8 +12,8 @@ use std::{
 };
 
 use nexrad_render::camera::orbit_camera::OrbitCamera;
-
-use nexrad_render::{OverlayLayerId, SiteRegistry};
+use nexrad_render::{OverlayLayerId, PluginEvent, RawCommand};
+use layer_radar_sites::SiteRegistry;
 use crate::{
     commands::RadarL2Command,
     elevation_mesh::build_elevation_mesh,
@@ -54,11 +54,6 @@ pub(crate) struct RadarDataChannel(pub(crate) async_channel::Receiver<TaggedVolu
 /// each volume to `RadarVolumeSender`.
 #[derive(Resource)]
 pub struct ExternalVolumeReceiver(pub async_channel::Receiver<TaggedVolume>);
-
-// ── Command receiver ──────────────────────────────────────────────────────────
-
-#[derive(Resource)]
-pub struct RadarL2CommandReceiver(pub async_channel::Receiver<RadarL2Command>);
 
 // ── Entity components ─────────────────────────────────────────────────────────
 
@@ -127,16 +122,13 @@ impl Plugin for RadarL2Plugin {
                .insert_resource(ext);
         }
 
-        if app.world().get_resource::<RadarL2CommandReceiver>().is_some() {
-            app.add_systems(Update, drain_radar_commands);
-        }
+        app.add_systems(Update, drain_radar_commands);
 
         if app.world().get_resource::<AnimationFrameSlots>().is_some() {
             app.add_systems(Update, receive_animation_frames);
         }
 
         app.init_resource::<LoadStatus>()
-            .init_resource::<state::StateNotifier>()
             .init_resource::<UiStateResource>()
             .init_resource::<RadarLayerStates>()
             .add_plugins(MaterialPlugin::<RadarMaterial>::default())
@@ -211,6 +203,15 @@ fn spawn_elevation_entities(
     }
 }
 
+fn notify_state(writer: &mut MessageWriter<PluginEvent>, ui_state: &state::UiState) {
+    if let Ok(json) = serde_json::to_string(ui_state) {
+        writer.write(PluginEvent {
+            name: "state_update".into(),
+            data: json,
+        });
+    }
+}
+
 fn receive_radar_data(
     mut commands: Commands,
     channel: Res<RadarDataChannel>,
@@ -219,7 +220,7 @@ fn receive_radar_data(
     mut materials: ResMut<Assets<RadarMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut status: ResMut<LoadStatus>,
-    notifier: Res<state::StateNotifier>,
+    mut events: MessageWriter<PluginEvent>,
     mut ui_state: ResMut<UiStateResource>,
     mut camera: Query<&mut OrbitCamera>,
     mut layer_states: ResMut<RadarLayerStates>,
@@ -281,21 +282,22 @@ fn receive_radar_data(
     status.radar_loaded = true;
     ui_state.0.radar_loaded = true;
     ui_state.0.sync_layers(&layer_states);
-    notifier.notify(&ui_state.0);
+    notify_state(&mut events, &ui_state.0);
 }
 
 fn drain_radar_commands(
     mut commands: Commands,
-    receiver: Res<RadarL2CommandReceiver>,
+    mut raw_commands: MessageReader<RawCommand>,
     elevations: Query<(Entity, &LayerId), With<RadarElevation>>,
     mut sweeps: Query<(&mut Visibility, &ElevationIndex, &LayerId), With<RadarElevation>>,
-    notifier: Res<state::StateNotifier>,
+    mut events: MessageWriter<PluginEvent>,
     mut ui_state: ResMut<UiStateResource>,
     mut layer_states: ResMut<RadarLayerStates>,
     elev_material_handles: Query<(&MeshMaterial3d<RadarMaterial>, &LayerId), With<RadarElevation>>,
     mut radar_materials: ResMut<Assets<RadarMaterial>>,
 ) {
-    while let Ok(cmd) = receiver.0.try_recv() {
+    for raw in raw_commands.read() {
+        let Some(cmd) = RadarL2Command::from_json(&raw.0) else { continue };
         match cmd {
             RadarL2Command::RemoveLayer { layer_id } => {
                 for (entity, lid) in &elevations {
@@ -305,7 +307,7 @@ fn drain_radar_commands(
                 }
                 layer_states.0.remove(&layer_id);
                 ui_state.0.sync_layers(&layer_states);
-                notifier.notify(&ui_state.0);
+                notify_state(&mut events, &ui_state.0);
             }
             RadarL2Command::SetElevationCount { layer_id, count } => {
                 if let Some(s) = layer_states.0.get_mut(&layer_id) {
@@ -318,7 +320,7 @@ fn drain_radar_commands(
                     }
                 }
                 ui_state.0.sync_layers(&layer_states);
-                notifier.notify(&ui_state.0);
+                notify_state(&mut events, &ui_state.0);
             }
             RadarL2Command::SetThreshold { layer_id, dbz } => {
                 if let Some(s) = layer_states.0.get_mut(&layer_id) {
@@ -332,7 +334,7 @@ fn drain_radar_commands(
                     }
                 }
                 ui_state.0.sync_layers(&layer_states);
-                notifier.notify(&ui_state.0);
+                notify_state(&mut events, &ui_state.0);
             }
             RadarL2Command::SetRangeKm { layer_id, range_km } => {
                 if let Some(s) = layer_states.0.get_mut(&layer_id) {
@@ -346,7 +348,7 @@ fn drain_radar_commands(
                     }
                 }
                 ui_state.0.sync_layers(&layer_states);
-                notifier.notify(&ui_state.0);
+                notify_state(&mut events, &ui_state.0);
             }
         }
     }

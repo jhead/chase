@@ -7,7 +7,8 @@ use bevy::{
 use bevy::ecs::observer::On;
 use bevy::picking::prelude::{Pickable, Pointer};
 use bevy::picking::events::Click;
-use nexrad_render::{OverlayLayerId, SiteClickNotifier, SiteRegistry};
+use nexrad_render::{OverlayLayerId, PluginEvent, RawCommand};
+use std::collections::HashMap;
 
 const WORLD_ORIGIN_LAT: f64 = 36.0;
 const WORLD_ORIGIN_LNG: f64 = -98.0;
@@ -46,6 +47,17 @@ pub struct SiteData {
     pub lng: f64,
 }
 
+/// Registry of known radar sites, populated dynamically at runtime.
+/// Keyed by 4-letter ICAO site ID (e.g. `"KTLX"`), value is `(lat, lng)`.
+#[derive(Resource, Default)]
+pub struct SiteRegistry(pub HashMap<String, (f64, f64)>);
+
+impl SiteRegistry {
+    pub fn lookup(&self, id: &str) -> Option<(f64, f64)> {
+        self.0.get(id).copied()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum RadarSitesCommand {
     SetSites(Vec<SiteData>),
@@ -70,9 +82,6 @@ impl RadarSitesCommand {
     }
 }
 
-#[derive(Resource)]
-pub struct RadarSitesCommandReceiver(pub async_channel::Receiver<RadarSitesCommand>);
-
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct RadarSitesPlugin;
@@ -89,11 +98,12 @@ fn receive_radar_sites(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<SiteMarkerMaterial>>,
-    receiver: Res<RadarSitesCommandReceiver>,
+    mut raw_commands: MessageReader<RawCommand>,
     existing: Query<Entity, With<RadarSiteMarker>>,
     mut registry: ResMut<SiteRegistry>,
 ) {
-    while let Ok(cmd) = receiver.0.try_recv() {
+    for raw in raw_commands.read() {
+        let Some(cmd) = RadarSitesCommand::from_json(&raw.0) else { continue };
         match cmd {
             RadarSitesCommand::SetSites(sites) => {
                 for entity in &existing {
@@ -131,9 +141,12 @@ fn receive_radar_sites(
                     entity_commands.observe(
                         |evt: On<Pointer<Click>>,
                          markers: Query<&RadarSiteMarker>,
-                         notifier: Res<SiteClickNotifier>| {
+                         mut events: MessageWriter<PluginEvent>| {
                             if let Ok(marker) = markers.get(evt.entity) {
-                                notifier.notify(&marker.site_id);
+                                events.write(PluginEvent {
+                                    name: "site_click".into(),
+                                    data: marker.site_id.clone(),
+                                });
                             }
                         },
                     );

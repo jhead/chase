@@ -9,21 +9,16 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::future_to_promise;
 
 // Engine
-use nexrad_render::{
-    EngineCommand, EngineCommandReceiver, EnginePlugin,
-    SiteClickNotifier, SiteRegistry,
-};
+use nexrad_render::{CommandBusReceiver, EnginePlugin, PluginEvent};
 
 // Plugins
 use layer_basemap::BasemapPlugin;
 use layer_radar_l2::{
     AnimationFrame, AnimationFrameSlots, ExternalVolumeReceiver,
     RadarL2Plugin, TaggedVolume,
-    commands::RadarL2Command, RadarL2CommandReceiver,
-    state::{StateNotifier, UiState},
 };
-use layer_noaa_alerts::{AlertCommand, AlertCommandReceiver, NoaaAlertsPlugin, AlertClickCallback};
-use layer_radar_sites::{RadarSitesPlugin, RadarSitesCommand, RadarSitesCommandReceiver};
+use layer_noaa_alerts::NoaaAlertsPlugin;
+use layer_radar_sites::{RadarSitesPlugin, SiteRegistry};
 
 // ── Static channels ─────────────────────────────────────────────────────────
 
@@ -36,26 +31,11 @@ static PENDING_SCANS: OnceLock<RwLock<HashMap<String, Vec<ElevationScan>>>> = On
 /// Per-layer animation frame slots. Shared Arc between JS and Bevy.
 static ANIM_SLOTS: OnceLock<AnimationFrameSlots> = OnceLock::new();
 
-/// Engine command channel.
-static ENGINE_CMD_TX: OnceLock<Sender<EngineCommand>> = OnceLock::new();
+/// Unified command channel (JS → Bevy).
+static CMD_TX: OnceLock<Sender<serde_json::Value>> = OnceLock::new();
 
-/// Radar L2 command channel.
-static RADAR_CMD_TX: OnceLock<Sender<RadarL2Command>> = OnceLock::new();
-
-/// Alert command channel.
-static ALERT_CMD_TX: OnceLock<Sender<AlertCommand>> = OnceLock::new();
-
-/// Radar sites command channel.
-static SITES_CMD_TX: OnceLock<Sender<RadarSitesCommand>> = OnceLock::new();
-
-/// JS callback registered via set_state_callback().
-static STATE_CB: OnceLock<js_sys::Function> = OnceLock::new();
-
-/// JS callback registered via set_alert_click_callback().
-static ALERT_CLICK_CB: OnceLock<js_sys::Function> = OnceLock::new();
-
-/// JS callback registered via set_site_click_callback().
-static SITE_CLICK_CB: OnceLock<js_sys::Function> = OnceLock::new();
+/// Unified event callback (Bevy → JS).
+static EVENT_CB: OnceLock<js_sys::Function> = OnceLock::new();
 
 // ── App entry point ─────────────────────────────────────────────────────────
 
@@ -73,62 +53,18 @@ pub fn run() {
     let anim_slots = AnimationFrameSlots::default();
     ANIM_SLOTS.set(anim_slots.clone()).ok();
 
-    // Engine command channel
-    let (engine_cmd_tx, engine_cmd_rx) = async_channel::unbounded::<EngineCommand>();
-    ENGINE_CMD_TX.set(engine_cmd_tx).ok();
-
-    // Radar L2 command channel
-    let (radar_cmd_tx, radar_cmd_rx) = async_channel::unbounded::<RadarL2Command>();
-    RADAR_CMD_TX.set(radar_cmd_tx).ok();
-
-    // Alert command channel
-    let (alert_cmd_tx, alert_cmd_rx) = async_channel::unbounded::<AlertCommand>();
-    ALERT_CMD_TX.set(alert_cmd_tx).ok();
-
-    // Radar sites command channel
-    let (sites_cmd_tx, sites_cmd_rx) = async_channel::unbounded::<RadarSitesCommand>();
-    SITES_CMD_TX.set(sites_cmd_tx).ok();
+    // Unified command channel
+    let (cmd_tx, cmd_rx) = async_channel::unbounded::<serde_json::Value>();
+    CMD_TX.set(cmd_tx).ok();
 
     App::new()
-        // Engine resources
-        .insert_resource(EngineCommandReceiver(engine_cmd_rx))
+        // Unified command bus
+        .insert_resource(CommandBusReceiver(cmd_rx))
         // Radar L2 resources
         .insert_resource(ExternalVolumeReceiver(vol_rx))
-        .insert_resource(RadarL2CommandReceiver(radar_cmd_rx))
         .insert_resource(anim_slots)
-        .insert_resource(StateNotifier(Some(Box::new(|state: &UiState| {
-            if let Some(cb) = STATE_CB.get() {
-                if let Ok(json) = serde_json::to_string(state) {
-                    let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&json));
-                }
-            }
-        }))))
-        // Alert resources
-        .insert_resource(AlertCommandReceiver(alert_cmd_rx))
-        // Radar sites resources
-        .insert_resource(RadarSitesCommandReceiver(sites_cmd_rx))
+        // Shared resources
         .init_resource::<SiteRegistry>()
-        .insert_resource(AlertClickCallback(Some(Box::new(|alert_id: &str| {
-            if let Some(cb) = ALERT_CLICK_CB.get() {
-                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(alert_id));
-            }
-        }))))
-        // Site click callback
-        .insert_resource(SiteClickNotifier(Some(Box::new(|site_id: &str| {
-            let site_id = site_id.to_string();
-            #[cfg(target_arch = "wasm32")]
-            wasm_bindgen_futures::spawn_local(async move {
-                if let Some(cb) = SITE_CLICK_CB.get() {
-                    let _ = cb.call1(&wasm_bindgen::JsValue::NULL, &wasm_bindgen::JsValue::from_str(&site_id));
-                }
-            });
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                if let Some(cb) = SITE_CLICK_CB.get() {
-                    let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&site_id));
-                }
-            }
-        }))))
         // Default Bevy plugins
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -145,64 +81,41 @@ pub fn run() {
         .add_plugins(RadarL2Plugin::default())
         .add_plugins(NoaaAlertsPlugin)
         .add_plugins(RadarSitesPlugin)
+        // Drain plugin events to JS
+        .add_systems(Update, drain_plugin_events)
         .run();
 }
 
-// ── Callbacks ───────────────────────────────────────────────────────────────
+// ── Event callback ──────────────────────────────────────────────────────────
 
 #[wasm_bindgen]
-pub fn set_state_callback(cb: js_sys::Function) {
-    STATE_CB.set(cb).ok();
+pub fn set_event_callback(cb: js_sys::Function) {
+    EVENT_CB.set(cb).ok();
 }
 
-#[wasm_bindgen]
-pub fn set_alert_click_callback(cb: js_sys::Function) {
-    ALERT_CLICK_CB.set(cb).ok();
-}
-
-#[wasm_bindgen]
-pub fn set_site_click_callback(cb: js_sys::Function) {
-    SITE_CLICK_CB.set(cb).ok();
+fn drain_plugin_events(mut events: MessageReader<PluginEvent>) {
+    for event in events.read() {
+        if let Some(cb) = EVENT_CB.get() {
+            let json = serde_json::json!({
+                "name": event.name,
+                "data": event.data,
+            });
+            let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&json.to_string()));
+        }
+    }
 }
 
 // ── Command routing ─────────────────────────────────────────────────────────
 
 /// Send a command to the renderer. `json` is a JSON-serialized command.
-/// Commands are routed to the appropriate plugin based on the `type` field.
+/// Commands are broadcast as `RawCommand` Bevy messages; each plugin
+/// parses what it recognizes.
 #[wasm_bindgen]
 pub fn send_command(json: &str) {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return };
-
-    // Try engine commands first
-    if let Some(cmd) = EngineCommand::from_json(&v) {
-        if let Some(tx) = ENGINE_CMD_TX.get() {
-            let _ = tx.try_send(cmd);
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
+        if let Some(tx) = CMD_TX.get() {
+            let _ = tx.try_send(v);
         }
-        return;
-    }
-
-    // Try radar-l2 commands
-    if let Some(cmd) = RadarL2Command::from_json(&v) {
-        if let Some(tx) = RADAR_CMD_TX.get() {
-            let _ = tx.try_send(cmd);
-        }
-        return;
-    }
-
-    // Try alert commands
-    if let Some(cmd) = AlertCommand::from_json(&v) {
-        if let Some(tx) = ALERT_CMD_TX.get() {
-            let _ = tx.try_send(cmd);
-        }
-        return;
-    }
-
-    // Try radar sites commands
-    if let Some(cmd) = RadarSitesCommand::from_json(&v) {
-        if let Some(tx) = SITES_CMD_TX.get() {
-            let _ = tx.try_send(cmd);
-        }
-        return;
     }
 }
 
