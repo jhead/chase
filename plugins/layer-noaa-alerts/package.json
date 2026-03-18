@@ -1,5 +1,5 @@
 {
-  "name": "@chase/layer-noaa-alerts",
+  "name": "@jhead/radish-layer-noaa-alerts",
   "private": true,
   "version": "0.0.0",
   "type": "module",

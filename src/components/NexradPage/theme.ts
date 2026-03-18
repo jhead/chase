@@ -1,4 +1,4 @@
-import colormap from "../../../nexrad-3d/nws_colormap.json";
+import colormap from "../../../radish/nws_colormap.json";
 
 export const theme = {
   bg: "rgba(10, 12, 18, 0.90)",

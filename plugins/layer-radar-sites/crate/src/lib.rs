@@ -7,7 +7,7 @@ use bevy::{
 use bevy::ecs::observer::On;
 use bevy::picking::prelude::{Pickable, Pointer};
 use bevy::picking::events::Click;
-use nexrad_render::{OverlayLayerId, PluginEvent, RawCommand};
+use radish_render::{OverlayLayerId, PluginEvent, RawCommand};
 use std::collections::HashMap;
 
 const WORLD_ORIGIN_LAT: f64 = 36.0;
@@ -119,7 +119,7 @@ fn receive_radar_sites(
                         .resolution(32),
                 );
                 for site in &sites {
-                    let (x, _, z) = nexrad_core::geo::wgs84_to_bevy(
+                    let (x, _, z) = radish_core::geo::wgs84_to_bevy(
                         site.lat,
                         site.lng,
                         WORLD_ORIGIN_LAT,

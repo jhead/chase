@@ -10,10 +10,10 @@ export default defineConfig({
   plugins: [react(), nodePolyfills(), wasm()],
   resolve: {
     alias: {
-      "@chase/layer-basemap": path.resolve(__dirname, "plugins/layer-basemap/src"),
-      "@chase/layer-radar-l2": path.resolve(__dirname, "plugins/layer-radar-l2/src"),
-      "@chase/layer-noaa-alerts": path.resolve(__dirname, "plugins/layer-noaa-alerts/src"),
-      "@chase/layer-radar-sites": path.resolve(__dirname, "plugins/layer-radar-sites/src"),
+      "@jhead/radish-layer-basemap": path.resolve(__dirname, "plugins/layer-basemap/src"),
+      "@jhead/radish-layer-radar-l2": path.resolve(__dirname, "plugins/layer-radar-l2/src"),
+      "@jhead/radish-layer-noaa-alerts": path.resolve(__dirname, "plugins/layer-noaa-alerts/src"),
+      "@jhead/radish-layer-radar-sites": path.resolve(__dirname, "plugins/layer-radar-sites/src"),
     },
   },
   worker: {

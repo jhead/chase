@@ -5,7 +5,7 @@ use bevy::{
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 
-use nexrad_core::types::ElevationScan;
+use radish_core::types::ElevationScan;
 
 /// Create an R8Unorm texture from an elevation scan's reflectivity data.
 ///

@@ -7,8 +7,8 @@ pub mod alert_material;
 pub mod alert_mesh;
 
 use bevy::{asset::embedded_asset, prelude::*};
-use nexrad_core::geo;
-use nexrad_render::{PluginEvent, RawCommand};
+use radish_core::geo;
+use radish_render::{PluginEvent, RawCommand};
 use serde::Deserialize;
 
 use crate::{alert_material::AlertMaterial, alert_mesh::build_alert_mesh};

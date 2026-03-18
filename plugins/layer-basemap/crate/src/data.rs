@@ -1,5 +1,5 @@
 use geojson::{GeoJson, Geometry, Value};
-use nexrad_core::geo::wgs84_to_bevy;
+use radish_core::geo::wgs84_to_bevy;
 
 const STATES_GEOJSON: &str = include_str!("data/states.geojson");
 const COUNTRIES_GEOJSON: &str = include_str!("data/countries.geojson");

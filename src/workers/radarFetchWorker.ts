@@ -1,5 +1,5 @@
 // With --target bundler, WASM initialises synchronously on import.
-import { fetch_and_parse } from "../wasm-worker/nexrad_worker.js";
+import { fetch_and_parse } from "../wasm-worker/radish_worker.js";
 
 // Parsed-volume cache: S3 key → postcard bytes.
 // Bytes are stored until claimed by the main thread (transferred zero-copy).

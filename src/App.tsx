@@ -18,7 +18,7 @@ function PersistentCanvas() {
     ? { position: "fixed", inset: 0, zIndex: 0, width: "100%", height: "100%", touchAction: "none" }
     : { position: "absolute", width: 0, height: 0, visibility: "hidden" };
 
-  return <canvas id="nexrad-bevy-canvas" style={style} onContextMenu={(e) => e.preventDefault()} />;
+  return <canvas id="radish-bevy-canvas" style={style} onContextMenu={(e) => e.preventDefault()} />;
 }
 
 function App() {

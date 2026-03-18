@@ -1,0 +1,16 @@
+[package]
+name = "radish-worker"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+radish-core = { path = "../radish-core", features = ["parse"] }
+radish-fetch = { path = "../radish-fetch" }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+postcard = { version = "1", features = ["alloc"] }
+console_error_panic_hook = "0.1"

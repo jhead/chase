@@ -1,11 +1,11 @@
 [workspace]
 members = [
-    "nexrad-3d/nexrad-core",
-    "nexrad-3d/nexrad-fetch",
-    "nexrad-3d/nexrad-render",
-    "nexrad-3d/nexrad-cli",
-    "nexrad-3d/nexrad-web",
-    "nexrad-3d/nexrad-worker",
+    "radish/radish-core",
+    "radish/radish-fetch",
+    "radish/radish-render",
+    "radish/radish-cli",
+    "radish/radish-web",
+    "radish/radish-worker",
     "plugins/layer-basemap/crate",
     "plugins/layer-radar-l2/crate",
     "plugins/layer-noaa-alerts/crate",

@@ -16,7 +16,7 @@ export function usePinchZoom(): void {
   sendRef.current = sendCommand;
 
   useEffect(() => {
-    const canvas = document.getElementById("nexrad-bevy-canvas");
+    const canvas = document.getElementById("radish-bevy-canvas");
     if (!canvas) return;
 
     let lastDist: number | null = null;

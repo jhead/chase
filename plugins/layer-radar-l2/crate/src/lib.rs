@@ -5,14 +5,14 @@ pub mod elevation_mesh;
 pub mod state;
 
 use bevy::{asset::embedded_asset, prelude::*};
-use nexrad_core::types::ElevationScan;
+use radish_core::types::ElevationScan;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
 
-use nexrad_render::camera::orbit_camera::OrbitCamera;
-use nexrad_render::{OverlayLayerId, PluginEvent, RawCommand};
+use radish_render::camera::orbit_camera::OrbitCamera;
+use radish_render::{OverlayLayerId, PluginEvent, RawCommand};
 use layer_radar_sites::SiteRegistry;
 use crate::{
     commands::RadarL2Command,
@@ -30,7 +30,7 @@ const WORLD_ORIGIN_LNG: f64 = -98.0;
 /// A `RadarVolume` tagged with the React layer that owns it.
 pub struct TaggedVolume {
     pub layer_id: String,
-    pub volume: nexrad_core::types::RadarVolume,
+    pub volume: radish_core::types::RadarVolume,
 }
 
 // ── Public resources ─────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ pub struct LoadStatus {
 #[derive(Resource)]
 pub(crate) struct RadarDataChannel(pub(crate) async_channel::Receiver<TaggedVolume>);
 
-/// When set (e.g. by nexrad-web), a system drains this receiver and forwards
+/// When set (e.g. by radish-web), a system drains this receiver and forwards
 /// each volume to `RadarVolumeSender`.
 #[derive(Resource)]
 pub struct ExternalVolumeReceiver(pub async_channel::Receiver<TaggedVolume>);
@@ -236,7 +236,7 @@ fn receive_radar_data(
     }
 
     let offset = if let Some((lat, lng)) = site_registry.lookup(&volume.site) {
-        let (x, _, z) = nexrad_core::geo::wgs84_to_bevy(
+        let (x, _, z) = radish_core::geo::wgs84_to_bevy(
             lat, lng, WORLD_ORIGIN_LAT, WORLD_ORIGIN_LNG,
         );
         Vec3::new(x, 0.0, z)

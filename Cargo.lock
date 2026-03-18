@@ -3703,8 +3703,8 @@ dependencies = [
  "geo-types",
  "geojson",
  "log",
- "nexrad-core",
- "nexrad-render",
+ "radish-core",
+ "radish-render",
 ]
 
 [[package]]
@@ -3714,8 +3714,8 @@ dependencies = [
  "bevy",
  "earcutr",
  "log",
- "nexrad-core",
- "nexrad-render",
+ "radish-core",
+ "radish-render",
  "serde",
  "serde_json",
 ]
@@ -3728,8 +3728,8 @@ dependencies = [
  "bevy",
  "layer-radar-sites",
  "log",
- "nexrad-core",
- "nexrad-render",
+ "radish-core",
+ "radish-render",
  "serde",
  "serde_json",
 ]
@@ -3740,8 +3740,8 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "log",
- "nexrad-core",
- "nexrad-render",
+ "radish-core",
+ "radish-render",
  "serde_json",
 ]
 
@@ -4077,35 +4077,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexrad-cli"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "clap",
- "layer-basemap",
- "layer-radar-l2",
- "nexrad-core",
- "nexrad-fetch",
- "nexrad-render",
- "tokio",
-]
-
-[[package]]
-name = "nexrad-core"
-version = "0.1.0"
-dependencies = [
- "bzip2",
- "lin_alg",
- "log",
- "nexrad-data",
- "nexrad-model",
- "once_cell",
- "postcard",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "nexrad-data"
 version = "1.0.0-rc.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4138,16 +4109,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexrad-fetch"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "log",
- "nexrad-core",
- "reqwest",
-]
-
-[[package]]
 name = "nexrad-model"
 version = "1.0.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4156,52 +4117,6 @@ dependencies = [
  "hex",
  "sha2",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "nexrad-render"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "bevy",
- "log",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "nexrad-web"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "bevy",
- "console_error_panic_hook",
- "js-sys",
- "layer-basemap",
- "layer-noaa-alerts",
- "layer-radar-l2",
- "layer-radar-sites",
- "log",
- "nexrad-core",
- "nexrad-fetch",
- "nexrad-render",
- "postcard",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "nexrad-worker"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "js-sys",
- "nexrad-core",
- "nexrad-fetch",
- "postcard",
- "wasm-bindgen",
- "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -4962,6 +4877,91 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "radish-cli"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "clap",
+ "layer-basemap",
+ "layer-radar-l2",
+ "radish-core",
+ "radish-fetch",
+ "radish-render",
+ "tokio",
+]
+
+[[package]]
+name = "radish-core"
+version = "0.1.0"
+dependencies = [
+ "bzip2",
+ "lin_alg",
+ "log",
+ "nexrad-data",
+ "nexrad-model",
+ "once_cell",
+ "postcard",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "radish-fetch"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "log",
+ "radish-core",
+ "reqwest",
+]
+
+[[package]]
+name = "radish-render"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "bevy",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "radish-web"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "bevy",
+ "console_error_panic_hook",
+ "js-sys",
+ "layer-basemap",
+ "layer-noaa-alerts",
+ "layer-radar-l2",
+ "layer-radar-sites",
+ "log",
+ "postcard",
+ "radish-core",
+ "radish-fetch",
+ "radish-render",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "radish-worker"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "js-sys",
+ "postcard",
+ "radish-core",
+ "radish-fetch",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
 
 [[package]]
 name = "radsort"

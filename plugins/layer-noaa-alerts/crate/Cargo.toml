@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-nexrad-render = { path = "../../../nexrad-3d/nexrad-render" }
-nexrad-core = { path = "../../../nexrad-3d/nexrad-core" }
+radish-render = { path = "../../../radish/radish-render" }
+radish-core = { path = "../../../radish/radish-core" }
 bevy = "0.18.1"
 earcutr = "0.4"
 log = "0.4"

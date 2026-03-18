@@ -60,7 +60,7 @@ let loadPromise: Promise<NexradWasm> | null = null;
 function loadWasm(): Promise<NexradWasm> {
   if (loadPromise) return loadPromise;
 
-  loadPromise = import("../wasm/nexrad_web.js")
+  loadPromise = import("../wasm/radish_web.js")
     .then((mod) => {
       wasmModule = mod as unknown as NexradWasm;
       return wasmModule;
