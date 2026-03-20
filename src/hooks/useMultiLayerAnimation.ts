@@ -1,35 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useWasm } from "../ctx/WasmContext";
-
-// ── Radar fetch worker ────────────────────────────────────────────────────────
-
-let _workerNextId = 0;
-const _workerPending = new Map<
-  number,
-  { resolve: (b: Uint8Array) => void; reject: (e: Error) => void }
->();
-
-const _radarWorker = new Worker(
-  new URL("../workers/radarFetchWorker.ts", import.meta.url),
-  { type: "module" }
-);
-
-_radarWorker.onmessage = (e: MessageEvent) => {
-  const { type, id, bytes, message } = e.data;
-  const p = _workerPending.get(id);
-  if (!p) return;
-  _workerPending.delete(id);
-  if (type === "result") p.resolve(bytes as Uint8Array);
-  else p.reject(new Error(message as string));
-};
-
-function workerFetch(key: string, siteId: string): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const id = _workerNextId++;
-    _workerPending.set(id, { resolve, reject });
-    _radarWorker.postMessage({ type: "fetch", id, key, siteId });
-  });
-}
 interface RadarLayer {
   id: string;
   kind: string;
@@ -369,9 +339,8 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
         if (count === 0) return;
 
         // Load the latest frame first (initial — creates mesh)
-        workerFetch(files[latestIdx], siteId)
-          .then((bytes) => {
-            w.receive_radar_volume(layerId, files[latestIdx], siteId, bytes);
+        w.load_initial_frame(layerId, files[latestIdx], siteId)
+          .then(() => {
             const cur = layerDataRef.current.get(layerId);
             if (!cur || cur.siteId !== siteId) return;
             cur.initialLoaded = true;
@@ -397,9 +366,8 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
         }
 
         for (const idx of indices) {
-          workerFetch(files[idx], siteId)
-            .then((bytes) => {
-              w.cache_radar_frame(layerId, files[idx], bytes);
+          w.load_frame(layerId, files[idx])
+            .then(() => {
               const cur = layerDataRef.current.get(layerId);
               if (!cur || cur.siteId !== siteId) return;
               cur.loadedFrames.add(idx);
