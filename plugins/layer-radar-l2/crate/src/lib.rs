@@ -25,6 +25,33 @@ use crate::{
 const WORLD_ORIGIN_LAT: f64 = 36.0;
 const WORLD_ORIGIN_LNG: f64 = -98.0;
 
+// ── Radar moment enum ─────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RadarMoment {
+    #[default]
+    Reflectivity,
+    Velocity,
+    SpectrumWidth,
+    DifferentialReflectivity,
+    CorrelationCoefficient,
+    DifferentialPhase,
+}
+
+impl RadarMoment {
+    pub fn index(&self) -> u32 {
+        match self {
+            RadarMoment::Reflectivity => 0,
+            RadarMoment::Velocity => 1,
+            RadarMoment::SpectrumWidth => 2,
+            RadarMoment::DifferentialReflectivity => 3,
+            RadarMoment::CorrelationCoefficient => 4,
+            RadarMoment::DifferentialPhase => 5,
+        }
+    }
+}
+
 // ── Tagged volume ─────────────────────────────────────────────────────────────
 
 /// A `RadarVolume` tagged with the React layer that owns it.
@@ -71,11 +98,32 @@ pub struct BaseElevationMarker;
 
 // ── Animation frame types ──────────────────────────────────────────────────
 
+/// Per-frame data for all available radar moments.
 #[derive(Clone)]
 pub struct AnimationFrame {
     pub num_rays: usize,
     pub num_gates: usize,
-    pub data: Vec<u8>,
+    /// Reflectivity bytes [0, 255]; always present.
+    pub reflectivity: Vec<u8>,
+    pub velocity: Option<Vec<u8>>,
+    pub spectrum_width: Option<Vec<u8>>,
+    pub differential_reflectivity: Option<Vec<u8>>,
+    pub correlation_coefficient: Option<Vec<u8>>,
+    pub differential_phase: Option<Vec<u8>>,
+}
+
+impl AnimationFrame {
+    /// Return the data slice for the requested moment, falling back to reflectivity.
+    pub fn moment_data(&self, moment: &RadarMoment) -> &Vec<u8> {
+        match moment {
+            RadarMoment::Reflectivity => &self.reflectivity,
+            RadarMoment::Velocity => self.velocity.as_ref().unwrap_or(&self.reflectivity),
+            RadarMoment::SpectrumWidth => self.spectrum_width.as_ref().unwrap_or(&self.reflectivity),
+            RadarMoment::DifferentialReflectivity => self.differential_reflectivity.as_ref().unwrap_or(&self.reflectivity),
+            RadarMoment::CorrelationCoefficient => self.correlation_coefficient.as_ref().unwrap_or(&self.reflectivity),
+            RadarMoment::DifferentialPhase => self.differential_phase.as_ref().unwrap_or(&self.reflectivity),
+        }
+    }
 }
 
 #[derive(Resource, Clone)]
@@ -179,12 +227,14 @@ fn spawn_elevation_entities(
     site_offset: Vec3,
 ) {
     let bounds = slab_bounds(scans);
+    let moment_idx = layer_state.active_moment.index() as f32;
     for (i, (scan, (lower, upper))) in scans.iter().zip(bounds.iter()).enumerate() {
         let mesh = build_elevation_mesh(scan, *lower, *upper);
         let texture = create_reflectivity_texture(images, scan);
         let material = materials.add(RadarMaterial {
             reflectivity_texture: texture,
             params: Vec4::new(layer_state.threshold_dbz, layer_state.range_km, site_offset.x, site_offset.z),
+            moment_params: Vec4::new(moment_idx, 0.0, 0.0, 0.0),
         });
         let visible = (i as u32) < layer_state.elevation_count;
         let mut entity = commands.spawn((
@@ -209,6 +259,26 @@ fn notify_state(writer: &mut MessageWriter<PluginEvent>, ui_state: &state::UiSta
             name: "state_update".into(),
             data: json,
         });
+    }
+}
+
+/// Build an `AnimationFrame` from an `ElevationScan` (converts f32 normalized → u8).
+pub fn scan_to_frame(scan: &ElevationScan) -> AnimationFrame {
+    fn to_u8(data: &[f32]) -> Vec<u8> {
+        data.iter().map(|&v| (v.clamp(0.0, 1.0) * 255.0) as u8).collect()
+    }
+    fn to_u8_opt(opt: &Option<Vec<f32>>) -> Option<Vec<u8>> {
+        opt.as_ref().map(|d| to_u8(d))
+    }
+    AnimationFrame {
+        num_rays: scan.num_rays,
+        num_gates: scan.num_gates,
+        reflectivity: to_u8(&scan.reflectivity),
+        velocity: to_u8_opt(&scan.velocity),
+        spectrum_width: to_u8_opt(&scan.spectrum_width),
+        differential_reflectivity: to_u8_opt(&scan.differential_reflectivity),
+        correlation_coefficient: to_u8_opt(&scan.correlation_coefficient),
+        differential_phase: to_u8_opt(&scan.differential_phase),
     }
 }
 
@@ -265,6 +335,24 @@ fn receive_radar_data(
     layer_state.elevation_count = 1.min(scans.len() as u32);
     layer_state.site_world_pos = offset;
     layer_state.site_id = Some(volume.site.clone());
+
+    // Build animation frame from base scan and compute available moments.
+    if !scans.is_empty() {
+        let frame = scan_to_frame(&scans[0]);
+        layer_state.available_moments = {
+            let mut m = vec!["reflectivity".to_string()];
+            if frame.velocity.is_some() { m.push("velocity".to_string()); }
+            if frame.spectrum_width.is_some() { m.push("spectrum_width".to_string()); }
+            if frame.differential_reflectivity.is_some() { m.push("differential_reflectivity".to_string()); }
+            if frame.correlation_coefficient.is_some() { m.push("correlation_coefficient".to_string()); }
+            if frame.differential_phase.is_some() { m.push("differential_phase".to_string()); }
+            m
+        };
+        layer_state.base_dims.num_rays = scans[0].num_rays;
+        layer_state.base_dims.num_gates = scans[0].num_gates;
+        layer_state.last_frame = Some(frame);
+    }
+
     let layer_state_snapshot = layer_state.clone();
 
     spawn_elevation_entities(
@@ -294,7 +382,9 @@ fn drain_radar_commands(
     mut ui_state: ResMut<UiStateResource>,
     mut layer_states: ResMut<RadarLayerStates>,
     elev_material_handles: Query<(&MeshMaterial3d<RadarMaterial>, &LayerId), With<RadarElevation>>,
+    base_elevations: Query<(&LayerId, &MeshMaterial3d<RadarMaterial>), With<BaseElevationMarker>>,
     mut radar_materials: ResMut<Assets<RadarMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     for raw in raw_commands.read() {
         let Some(cmd) = RadarL2Command::from_json(&raw.0) else { continue };
@@ -350,6 +440,38 @@ fn drain_radar_commands(
                 ui_state.0.sync_layers(&layer_states);
                 notify_state(&mut events, &ui_state.0);
             }
+            RadarL2Command::SetActiveMoment { layer_id, moment } => {
+                let moment_idx = moment.index() as f32;
+
+                // Update moment_params on all elevation meshes for this layer.
+                for (handle, lid) in &elev_material_handles {
+                    if lid.0 == layer_id {
+                        if let Some(mat) = radar_materials.get_mut(&handle.0) {
+                            mat.moment_params.x = moment_idx;
+                        }
+                    }
+                }
+
+                // Re-apply the last cached frame with the new moment's data.
+                if let Some(s) = layer_states.0.get_mut(&layer_id) {
+                    s.active_moment = moment.clone();
+                    if let Some(frame) = s.last_frame.clone() {
+                        let data = frame.moment_data(&moment).clone();
+                        for (lid, mat_handle) in &base_elevations {
+                            if lid.0 == layer_id {
+                                if let Some(mat) = radar_materials.get_mut(&mat_handle.0) {
+                                    if let Some(image) = images.get_mut(&mat.reflectivity_texture) {
+                                        image.data = Some(data.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                ui_state.0.sync_layers(&layer_states);
+                notify_state(&mut events, &ui_state.0);
+            }
         }
     }
 }
@@ -374,16 +496,24 @@ fn receive_animation_frames(
         };
         let Some(frame) = frame else { continue };
 
-        let Some(mat) = radar_materials.get_mut(&mat_handle.0) else { continue };
-        let tex_handle = &mat.reflectivity_texture;
-
-        let dims = layer_states.0
+        let layer_state = layer_states.0
             .entry(layer_id.0.clone())
             .or_insert_with(|| RadarLayerState::new(10.0));
 
-        if frame.num_rays == dims.base_dims.num_rays && frame.num_gates == dims.base_dims.num_gates {
-            if let Some(image) = images.get_mut(tex_handle) {
-                image.data = Some(frame.data);
+        // Store frame for moment-switch use.
+        let active_moment = layer_state.active_moment.clone();
+        layer_state.last_frame = Some(frame.clone());
+
+        let data = frame.moment_data(&active_moment);
+        let moment_idx = active_moment.index() as f32;
+
+        let Some(mat) = radar_materials.get_mut(&mat_handle.0) else { continue };
+        mat.moment_params.x = moment_idx;
+        let tex_handle = mat.reflectivity_texture.clone();
+
+        if frame.num_rays == layer_state.base_dims.num_rays && frame.num_gates == layer_state.base_dims.num_gates {
+            if let Some(image) = images.get_mut(&tex_handle) {
+                image.data = Some(data.clone());
             }
         } else {
             use bevy::{
@@ -398,7 +528,7 @@ fn receive_animation_frames(
                     depth_or_array_layers: 1,
                 },
                 TextureDimension::D2,
-                frame.data,
+                data.clone(),
                 TextureFormat::R8Unorm,
                 RenderAssetUsages::RENDER_WORLD,
             );
@@ -411,8 +541,8 @@ fn receive_animation_frames(
             if let Some(mat) = radar_materials.get_mut(&mat_handle.0) {
                 mat.reflectivity_texture = new_handle;
             }
-            dims.base_dims.num_rays = frame.num_rays;
-            dims.base_dims.num_gates = frame.num_gates;
+            layer_state.base_dims.num_rays = frame.num_rays;
+            layer_state.base_dims.num_gates = frame.num_gates;
         }
     }
 }

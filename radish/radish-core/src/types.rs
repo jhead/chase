@@ -10,6 +10,16 @@ pub struct ElevationScan {
     pub azimuths: Vec<f32>,
     /// Normalized reflectivity in [0.0, 1.0]. Layout: row-major, index = ray * num_gates + gate.
     pub reflectivity: Vec<f32>,
+    /// Radial velocity in [0.0, 1.0], mapped from [-100, 100] m/s. None if not present in data.
+    pub velocity: Option<Vec<f32>>,
+    /// Spectrum width in [0.0, 1.0], mapped from [0, 10] m/s. None if not present.
+    pub spectrum_width: Option<Vec<f32>>,
+    /// Differential reflectivity in [0.0, 1.0], mapped from [-8, 8] dB. None if not present.
+    pub differential_reflectivity: Option<Vec<f32>>,
+    /// Correlation coefficient in [0.0, 1.0], mapped from [0, 1.05]. None if not present.
+    pub correlation_coefficient: Option<Vec<f32>>,
+    /// Differential phase in [0.0, 1.0], mapped from [-180, 360] deg. None if not present.
+    pub differential_phase: Option<Vec<f32>>,
 }
 
 impl ElevationScan {
@@ -76,6 +86,11 @@ impl ElevationScan {
             first_gate_m,
             azimuths,
             reflectivity,
+            velocity: None,
+            spectrum_width: None,
+            differential_reflectivity: None,
+            correlation_coefficient: None,
+            differential_phase: None,
         }
     }
 }

@@ -7,12 +7,15 @@ import { theme } from "../../../src/components/NexradPage/theme";
 import { LayerCard } from "../../../src/components/NexradPage/LayerCard";
 import type { SidebarCardProps } from "../../../src/plugins/registry";
 import type { RadarLayer, Product } from "./types";
+import { PRODUCT_MOMENT } from "./types";
 
-const PRODUCTS: { id: Product; label: string; available: boolean }[] = [
-  { id: "REF", label: "Reflectivity", available: true },
-  { id: "VEL", label: "Velocity",     available: false },
-  { id: "CC",  label: "Corr. Coeff.", available: false },
-  { id: "ZDR", label: "Diff. Refl.",  available: false },
+const PRODUCTS: { id: Product; label: string }[] = [
+  { id: "REF",   label: "Reflectivity" },
+  { id: "VEL",   label: "Velocity"     },
+  { id: "SW",    label: "Spec. Width"  },
+  { id: "ZDR",   label: "Diff. Refl."  },
+  { id: "CC",    label: "Corr. Coeff." },
+  { id: "PHIDP", label: "Diff. Phase"  },
 ];
 
 export function RadarLayerCard({
@@ -82,17 +85,25 @@ export function RadarLayerCard({
       {/* Product */}
       <SubLabel>Product</SubLabel>
       <ProductGrid>
-        {PRODUCTS.map(({ id, label: plabel, available }) => (
-          <ProductBtn
-            key={id}
-            active={layer.product === id}
-            disabled={!available}
-            title={available ? plabel : `${plabel} — coming soon`}
-            onClick={() => available && onUpdateLayer({ product: id } as Partial<RadarLayer>)}
-          >
-            {id}
-          </ProductBtn>
-        ))}
+        {PRODUCTS.map(({ id, label: plabel }) => {
+          const momentName = PRODUCT_MOMENT[id];
+          const available = !layerUiState || layerUiState.available_moments.includes(momentName);
+          return (
+            <ProductBtn
+              key={id}
+              active={layer.product === id}
+              disabled={!available}
+              title={available ? plabel : `${plabel} — not in this scan`}
+              onClick={() => {
+                if (!available) return;
+                onUpdateLayer({ product: id } as Partial<RadarLayer>);
+                sendCommand({ type: "SetActiveMoment", layer_id: layer.id, moment: momentName });
+              }}
+            >
+              {id}
+            </ProductBtn>
+          );
+        })}
       </ProductGrid>
 
       {/* Product-specific controls */}
@@ -226,7 +237,7 @@ const SiteName = styled.span`
 
 const ProductGrid = styled.div`
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 4px;
 `;
 

@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use serde::Serialize;
 use std::collections::HashMap;
 
+use crate::{AnimationFrame, RadarMoment};
+
 // ── Per-layer state ───────────────────────────────────────────────────────────
 
 #[derive(Clone, Default)]
@@ -19,6 +21,11 @@ pub struct RadarLayerState {
     pub site_world_pos: Vec3,
     pub base_dims: BaseTextureDims,
     pub site_id: Option<String>,
+    pub active_moment: RadarMoment,
+    /// Last frame received — used to re-apply when the active moment changes.
+    pub last_frame: Option<AnimationFrame>,
+    /// Moments present in the most recent volume (snake_case names).
+    pub available_moments: Vec<String>,
 }
 
 impl Default for RadarLayerState {
@@ -31,6 +38,9 @@ impl Default for RadarLayerState {
             site_world_pos: Vec3::ZERO,
             base_dims: BaseTextureDims::default(),
             site_id: None,
+            active_moment: RadarMoment::default(),
+            last_frame: None,
+            available_moments: vec!["reflectivity".to_string()],
         }
     }
 }
@@ -54,6 +64,7 @@ pub struct UiRadarLayerState {
     pub elevation_total: u32,
     pub threshold_dbz: f32,
     pub range_km: f32,
+    pub available_moments: Vec<String>,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -75,6 +86,7 @@ impl UiState {
             elevation_total: s.elevation_total,
             threshold_dbz: s.threshold_dbz,
             range_km: s.range_km,
+            available_moments: s.available_moments.clone(),
         }).collect();
         self.radar_layers.sort_by(|a, b| a.layer_id.cmp(&b.layer_id));
 

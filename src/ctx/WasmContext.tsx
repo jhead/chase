@@ -30,6 +30,8 @@ export interface UiRadarLayerState {
   elevation_total: number;
   threshold_dbz: number;
   range_km: number;
+  /** Moment names present in the most recent volume (snake_case). */
+  available_moments: string[];
 }
 
 /** Serializable state pushed from Bevy to React on meaningful changes. */

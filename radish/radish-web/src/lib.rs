@@ -156,6 +156,11 @@ pub fn add_scan(
             first_gate_m,
             azimuths: az_vec,
             reflectivity: ref_vec,
+            velocity: None,
+            spectrum_width: None,
+            differential_reflectivity: None,
+            correlation_coefficient: None,
+            differential_phase: None,
         };
 
         if let Some(cell) = PENDING_SCANS.get() {
@@ -191,7 +196,7 @@ pub fn commit_volume(layer_id: &str, site_id: &str) {
     }
 }
 
-/// Update the base elevation texture for a specific layer (for animation playback).
+/// Update the base elevation texture for a specific layer (reflectivity only, legacy API).
 #[wasm_bindgen]
 pub fn update_layer_texture(layer_id: &str, num_rays: u32, num_gates: u32, data: &[u8]) {
     if let Some(slots) = ANIM_SLOTS.get() {
@@ -200,7 +205,12 @@ pub fn update_layer_texture(layer_id: &str, num_rays: u32, num_gates: u32, data:
             *g = Some(AnimationFrame {
                 num_rays: num_rays as usize,
                 num_gates: num_gates as usize,
-                data: data.to_vec(),
+                reflectivity: data.to_vec(),
+                velocity: None,
+                spectrum_width: None,
+                differential_reflectivity: None,
+                correlation_coefficient: None,
+                differential_phase: None,
             });
         }
     }
@@ -240,16 +250,8 @@ fn apply_frame_from_cache(layer_id: &str, key: &str) {
 }
 
 fn elevation_to_frame(elev: &radish_core::types::ElevationScan) -> AnimationFrame {
-    let data: Vec<u8> = elev
-        .reflectivity
-        .iter()
-        .map(|&v| (v * 255.0).round() as u8)
-        .collect();
-    AnimationFrame {
-        num_rays: elev.num_rays,
-        num_gates: elev.num_gates,
-        data,
-    }
+    use layer_radar_l2::scan_to_frame;
+    scan_to_frame(elev)
 }
 
 /// List available radar frames for `site` on `date` ("YYYY/MM/DD").

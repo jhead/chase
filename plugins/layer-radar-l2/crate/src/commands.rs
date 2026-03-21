@@ -1,3 +1,5 @@
+use crate::RadarMoment;
+
 /// Commands specific to the radar L2 plugin, parsed from JSON.
 #[derive(Debug, Clone)]
 pub enum RadarL2Command {
@@ -9,6 +11,8 @@ pub enum RadarL2Command {
     SetThreshold { layer_id: String, dbz: f32 },
     /// Set the render range cap in km for a specific radar layer.
     SetRangeKm { layer_id: String, range_km: f32 },
+    /// Switch the active radar moment (product) for a layer.
+    SetActiveMoment { layer_id: String, moment: RadarMoment },
 }
 
 impl RadarL2Command {
@@ -32,6 +36,20 @@ impl RadarL2Command {
                 let layer_id = v["layer_id"].as_str().unwrap_or("radar-1").to_string();
                 let range_km = v["range_km"].as_f64()? as f32;
                 Some(RadarL2Command::SetRangeKm { layer_id, range_km })
+            }
+            "SetActiveMoment" => {
+                let layer_id = v["layer_id"].as_str().unwrap_or("radar-1").to_string();
+                let moment_str = v["moment"].as_str()?;
+                let moment = match moment_str {
+                    "reflectivity" => RadarMoment::Reflectivity,
+                    "velocity" => RadarMoment::Velocity,
+                    "spectrum_width" => RadarMoment::SpectrumWidth,
+                    "differential_reflectivity" => RadarMoment::DifferentialReflectivity,
+                    "correlation_coefficient" => RadarMoment::CorrelationCoefficient,
+                    "differential_phase" => RadarMoment::DifferentialPhase,
+                    _ => return None,
+                };
+                Some(RadarL2Command::SetActiveMoment { layer_id, moment })
             }
             _ => None,
         }

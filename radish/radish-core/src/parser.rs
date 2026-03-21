@@ -1,5 +1,5 @@
 use nexrad_data::volume::File;
-use nexrad_model::data::{MomentValue, Sweep};
+use nexrad_model::data::{MomentValue, Radial, Sweep};
 
 use crate::types::{ElevationScan, RadarVolume};
 
@@ -29,6 +29,41 @@ pub fn parse_volume(site: &str, data: Vec<u8>) -> Result<RadarVolume, String> {
         site: site.to_string(),
         elevations,
     })
+}
+
+/// Extract and normalise a single moment from sorted radials into a flat Vec<f32>.
+///
+/// All values are in [0.0, 1.0]; BelowThreshold / RangeFolded → 0.0 (no-data sentinel).
+/// Gate data is padded with 0.0 or truncated to `num_gates` so all moments share the same layout.
+fn extract_moment<F>(
+    sorted: &[&Radial],
+    num_rays: usize,
+    num_gates: usize,
+    getter: F,
+    normalize: impl Fn(f32) -> f32,
+) -> Option<Vec<f32>>
+where
+    F: Fn(&Radial) -> Option<&nexrad_model::data::MomentData>,
+{
+    if !sorted.iter().any(|r| getter(r).is_some()) {
+        return None;
+    }
+
+    let mut data = vec![0.0_f32; num_rays * num_gates];
+    for (ray_i, radial) in sorted.iter().enumerate() {
+        let Some(moment) = getter(radial) else { continue };
+        for (gate_i, val) in moment.values().iter().enumerate() {
+            if gate_i >= num_gates {
+                break;
+            }
+            let v = match val {
+                MomentValue::Value(v) => normalize(*v).clamp(0.0, 1.0),
+                MomentValue::BelowThreshold | MomentValue::RangeFolded => 0.0,
+            };
+            data[ray_i * num_gates + gate_i] = v;
+        }
+    }
+    Some(data)
 }
 
 /// Convert one `nexrad_model` sweep into our `ElevationScan`.
@@ -86,6 +121,37 @@ fn sweep_to_elevation_scan(sweep: &Sweep) -> Option<ElevationScan> {
         }
     }
 
+    // Extract dual-pol / Doppler moments. Each uses the same gate layout as reflectivity.
+    let velocity = extract_moment(
+        &sorted, num_rays, num_gates,
+        |r| r.velocity(),
+        |v| (v + 100.0) / 200.0,
+    );
+
+    let spectrum_width = extract_moment(
+        &sorted, num_rays, num_gates,
+        |r| r.spectrum_width(),
+        |v| v / 10.0,
+    );
+
+    let differential_reflectivity = extract_moment(
+        &sorted, num_rays, num_gates,
+        |r| r.differential_reflectivity(),
+        |v| (v + 8.0) / 16.0,
+    );
+
+    let correlation_coefficient = extract_moment(
+        &sorted, num_rays, num_gates,
+        |r| r.correlation_coefficient(),
+        |v| v / 1.05,
+    );
+
+    let differential_phase = extract_moment(
+        &sorted, num_rays, num_gates,
+        |r| r.differential_phase(),
+        |v| (v + 180.0) / 540.0,
+    );
+
     Some(ElevationScan {
         elevation_angle,
         num_rays,
@@ -94,5 +160,10 @@ fn sweep_to_elevation_scan(sweep: &Sweep) -> Option<ElevationScan> {
         first_gate_m,
         azimuths,
         reflectivity,
+        velocity,
+        spectrum_width,
+        differential_reflectivity,
+        correlation_coefficient,
+        differential_phase,
     })
 }
