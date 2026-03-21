@@ -84,7 +84,7 @@ export function Sidebar({
 
         {/* Add layer button */}
         <AddLayerWrap>
-          <AddLayerBtn onClick={() => setMenuOpen((o) => !o)}>+ ADD RADAR SITE</AddLayerBtn>
+          <AddLayerBtn onClick={() => setMenuOpen((o) => !o)}>+ Add Layer</AddLayerBtn>
           {menuOpen && addablePlugins.length > 0 && (
             <AddLayerMenu>
               {addablePlugins.map((p) => (
