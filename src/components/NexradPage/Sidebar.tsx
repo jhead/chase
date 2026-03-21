@@ -135,7 +135,7 @@ export function Sidebar({
             </LoopToggle>
           </LoopRow>
           <FrameCountLabel>
-            {animationState.loadedFrames.size} / {animationState.frameCount} frames loaded
+            {animationState.loadedTimestampsMs.size} / {animationState.allTimestampsMs.length} frames loaded
           </FrameCountLabel>
         </Section>
       )}

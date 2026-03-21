@@ -54,6 +54,6 @@ export function send_command(json: string): void;
 export function set_event_callback(cb: Function): void;
 
 /**
- * Update the base elevation texture for a specific layer (for animation playback).
+ * Update the base elevation texture for a specific layer (reflectivity only, legacy API).
  */
 export function update_layer_texture(layer_id: string, num_rays: number, num_gates: number, data: Uint8Array): void;

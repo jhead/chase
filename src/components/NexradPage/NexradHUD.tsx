@@ -31,8 +31,14 @@ export function NexradHUD() {
   const { wasm, sendCommand, isReady, subscribe } = useWasm();
   const { layers, addLayer, removeLayer, updateLayer } = useLayers();
 
+  // Global time window state
+  const [endTime, setEndTime] = useState<Date>(() => new Date());
+  const [liveMode, setLiveMode] = useState(true);
+  const endTimeRef = useRef(endTime);
+  endTimeRef.current = endTime;
+
   // Filter radar layers for animation (need siteId field)
-  const radarLayers = layers.filter((l) => l.kind === "radar-l2" && l.siteId) as (LayerBase & { siteId: string })[];
+  const radarLayers = layers.filter((l) => l.kind === "radar-l2" && l.siteId && l.enabled) as (LayerBase & { siteId: string })[];
   const anim = useMultiLayerAnimation(radarLayers);
 
   // Build plugin context for layer effects
@@ -49,13 +55,29 @@ export function NexradHUD() {
       const prev = prevSiteIdsRef.current.get(layer.id) ?? null;
       if (siteId && siteId !== prev) {
         prevSiteIdsRef.current.set(layer.id, siteId);
-        anim.initLayer(layer.id, siteId);
+        anim.initLayer(layer.id, siteId, endTimeRef.current);
       }
     }
   }, [layers, anim]);
 
+  function handleEndTimeChange(newEnd: Date) {
+    setEndTime(newEnd);
+    setLiveMode(false);
+    for (const layer of radarLayers) {
+      anim.initLayer(layer.id, layer.siteId, newEnd);
+    }
+  }
+
+  function handleGoLive() {
+    const now = new Date();
+    setEndTime(now);
+    setLiveMode(true);
+    for (const layer of radarLayers) {
+      anim.initLayer(layer.id, layer.siteId, now);
+    }
+  }
+
   // Handle site clicks — add a new radar layer for the clicked site.
-  // Re-subscribe only when subscribe reference changes (stable), not on every layers change.
   const layersRef = useRef(layers);
   layersRef.current = layers;
   const addLayerRef = useRef(addLayer);
@@ -72,9 +94,12 @@ export function NexradHUD() {
       const newId = addLayerRef.current("radar-l2");
       if (newId) {
         updateLayerRef.current(newId, { siteId });
+        // initLayer will be triggered by the useEffect above when siteId propagates
       }
     });
   }, [subscribe]);
+
+  const { windowStartMs, windowEndMs, playbackTimeMs, allTimestampsMs, loadedTimestampsMs } = anim.state;
 
   return (
     <Root>
@@ -82,11 +107,15 @@ export function NexradHUD() {
         onSiteClick={() => setSidebarOpen((v) => !v)}
         animation={anim.state}
         onTogglePlay={anim.togglePlay}
-        onPrevFrame={anim.prevFrame}
-        onNextFrame={anim.nextFrame}
-        onSeekFirst={() => anim.seekTo(0)}
-        onSeekLast={() => anim.seekTo(anim.state.frameCount - 1)}
+        onStepBack={anim.stepBack}
+        onStepForward={anim.stepForward}
+        onSeekStart={() => anim.seekToTime(windowStartMs)}
+        onSeekEnd={() => anim.seekToTime(windowEndMs)}
         onCycleSpeed={anim.cycleSpeed}
+        endTime={endTime}
+        liveMode={liveMode}
+        onEndTimeChange={handleEndTimeChange}
+        onGoLive={handleGoLive}
       />
 
       <Body>
@@ -102,7 +131,14 @@ export function NexradHUD() {
         <CanvasArea>
           <CanvasButtons />
           <ScrubBarWrap>
-            <ScrubBar state={anim.state} onSeek={anim.seekTo} />
+            <ScrubBar
+              windowStartMs={windowStartMs}
+              windowEndMs={windowEndMs}
+              playbackTimeMs={playbackTimeMs}
+              allTimestampsMs={allTimestampsMs}
+              loadedTimestampsMs={loadedTimestampsMs}
+              onSeek={anim.seekToTime}
+            />
           </ScrubBarWrap>
           <ReflectivityLegend />
         </CanvasArea>

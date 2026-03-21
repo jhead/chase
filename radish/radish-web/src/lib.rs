@@ -270,13 +270,17 @@ pub fn list_radar_frames(site: String, date: String) -> js_sys::Promise {
             .iter()
             .map(|f| {
                 // S3 key format: YYYY/MM/DD/SITE/SITE_YYYYMMDD_HHMMSS_V06
-                // Extract the HHMMSS part from the filename component
-                let filename = f.rsplit('/').next().unwrap_or(f.as_str());
-                let parts: Vec<&str> = filename.split('_').collect();
-                if parts.len() >= 3 {
-                    let t = parts[2]; // HHMMSS
-                    if t.len() >= 4 {
-                        return format!("{}:{}Z", &t[..2], &t[2..4]);
+                // Split into path components to extract date and time
+                let parts: Vec<&str> = f.splitn(5, '/').collect();
+                if parts.len() == 5 {
+                    let fp: Vec<&str> = parts[4].split('_').collect();
+                    if fp.len() >= 2 && fp[1].len() >= 6 {
+                        let t = fp[1]; // HHMMSS
+                        return format!(
+                            "{}-{}-{}T{}:{}:{}Z",
+                            parts[0], parts[1], parts[2],
+                            &t[..2], &t[2..4], &t[4..6]
+                        );
                     }
                 }
                 String::new()

@@ -10,41 +10,50 @@ import {
 import { useWasm } from "../../ctx/WasmContext";
 import { theme } from "./theme";
 import type { AnimationState } from "../../hooks/useMultiLayerAnimation";
+import { DateTimePicker } from "./DateTimePicker";
 
 interface TopBarProps {
   onSiteClick: () => void;
   animation: AnimationState;
   onTogglePlay: () => void;
-  onPrevFrame: () => void;
-  onNextFrame: () => void;
-  onSeekFirst: () => void;
-  onSeekLast: () => void;
+  onStepBack: () => void;
+  onStepForward: () => void;
+  onSeekStart: () => void;
+  onSeekEnd: () => void;
   onCycleSpeed: () => void;
+  endTime: Date;
+  liveMode: boolean;
+  onEndTimeChange: (d: Date) => void;
+  onGoLive: () => void;
+}
+
+function formatUtcTime(ms: number): string {
+  const d = new Date(ms);
+  const h = String(d.getUTCHours()).padStart(2, "0");
+  const min = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${h}:${min} UTC`;
 }
 
 export function TopBar({
   onSiteClick,
   animation,
   onTogglePlay,
-  onPrevFrame,
-  onNextFrame,
-  onSeekFirst,
-  onSeekLast,
+  onStepBack,
+  onStepForward,
+  onSeekStart,
+  onSeekEnd,
   onCycleSpeed,
+  endTime,
+  liveMode,
+  onEndTimeChange,
+  onGoLive,
 }: TopBarProps) {
   const { uiState } = useWasm();
-  const { radar_loaded, active_site } = uiState;
-  const { playing, frameIndex, frameCount, speed, timestamps, ready } = animation;
+  const { active_site } = uiState;
+  const { playing, playbackTimeMs, speed, ready } = animation;
 
-  const loadingText = radar_loaded ? "Ready" : "Loading...";
-  const loadingColor = radar_loaded ? "#4caf7d" : theme.textDim;
-
-  const enabled = ready && radar_loaded;
-  const frameLabel =
-    frameCount > 0
-      ? `${frameIndex + 1} / ${frameCount}`
-      : "—";
-  const timeLabel = timestamps[frameIndex] ?? "";
+  const enabled = ready;
+  const timeLabel = ready ? formatUtcTime(playbackTimeMs) : "—";
 
   return (
     <Bar>
@@ -55,10 +64,10 @@ export function TopBar({
       </Left>
 
       <Center>
-        <AnimBtn title="First frame" disabled={!enabled} onClick={onSeekFirst}>
+        <AnimBtn title="Seek to start" disabled={!enabled} onClick={onSeekStart}>
           <ChevronsLeft size={13} strokeWidth={1.5} />
         </AnimBtn>
-        <AnimBtn title="Previous frame" disabled={!enabled} onClick={onPrevFrame}>
+        <AnimBtn title="Previous frame" disabled={!enabled} onClick={onStepBack}>
           <ChevronLeft size={13} strokeWidth={1.5} />
         </AnimBtn>
         <AnimBtn title="Play / Pause" disabled={!enabled} onClick={onTogglePlay}>
@@ -68,10 +77,10 @@ export function TopBar({
             <Play size={13} strokeWidth={1.5} />
           )}
         </AnimBtn>
-        <AnimBtn title="Next frame" disabled={!enabled} onClick={onNextFrame}>
+        <AnimBtn title="Next frame" disabled={!enabled} onClick={onStepForward}>
           <ChevronRight size={13} strokeWidth={1.5} />
         </AnimBtn>
-        <AnimBtn title="Last frame" disabled={!enabled} onClick={onSeekLast}>
+        <AnimBtn title="Seek to end" disabled={!enabled} onClick={onSeekEnd}>
           <ChevronsRight size={13} strokeWidth={1.5} />
         </AnimBtn>
         <SpeedLabel
@@ -81,15 +90,16 @@ export function TopBar({
         >
           {speed}×
         </SpeedLabel>
-        <FrameLabel>
-          {frameLabel}
-          {timeLabel ? ` · ${timeLabel}` : ""}
-        </FrameLabel>
+        <TimeLabel>{timeLabel}</TimeLabel>
       </Center>
 
       <Right>
-        <StatusDot style={{ background: loadingColor }} />
-        <StatusText>{loadingText}</StatusText>
+        <DateTimePicker
+          endTime={endTime}
+          liveMode={liveMode}
+          onCommit={onEndTimeChange}
+          onGoLive={onGoLive}
+        />
       </Right>
     </Bar>
   );
@@ -185,22 +195,10 @@ const SpeedLabel = styled.span`
   }
 `;
 
-const FrameLabel = styled.span`
+const TimeLabel = styled.span`
   font-family: ${theme.fontMono};
   font-size: 11px;
   color: ${theme.textSecondary};
-`;
-
-const StatusDot = styled.span`
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  display: inline-block;
-`;
-
-const StatusText = styled.span`
-  font-family: ${theme.fontMono};
-  font-size: 11px;
-  color: ${theme.textSecondary};
+  padding: 0 4px;
+  min-width: 72px;
 `;

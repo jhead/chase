@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useWasm } from "../ctx/WasmContext";
+import { fetchFramesForWindow } from "../utils/fetchFramesForWindow";
 
 // ── Radar fetch worker ────────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ function workerFetch(key: string, siteId: string): Promise<Uint8Array> {
     _radarWorker.postMessage({ type: "fetch", id, key, siteId });
   });
 }
+
 interface RadarLayer {
   id: string;
   kind: string;
@@ -42,12 +44,17 @@ interface RadarLayer {
 /** Global animation state shared across all radar layers. */
 export interface AnimationState {
   playing: boolean;
-  frameIndex: number;
-  frameCount: number;
+  /** Current wall-clock playback position (Unix ms). */
+  playbackTimeMs: number;
+  /** Start of the loaded window (endTime − WINDOW_MS). */
+  windowStartMs: number;
+  /** End of the loaded window (selected end time T). */
+  windowEndMs: number;
   speed: number;
-  timestamps: string[];
-  /** Loaded frames from the PRIMARY layer (drives the scrub bar). */
-  loadedFrames: Set<number>;
+  /** Union of all layer frame timestamps, sorted ascending. Used by ScrubBar. */
+  allTimestampsMs: number[];
+  /** Timestamps (Unix ms) of loaded frames in the PRIMARY layer. */
+  loadedTimestampsMs: Set<number>;
   ready: boolean;
   loop: boolean;
 }
@@ -55,49 +62,29 @@ export interface AnimationState {
 interface LayerData {
   siteId: string;
   files: string[];
+  /** Parallel to files[]: Unix ms timestamp for each frame. */
+  timestampsMs: number[];
   loadedFrames: Set<number>;
   initialLoaded: boolean;
-  /** Current frame index for this layer (advances independently during playback). */
   currentFrameIndex: number;
 }
 
 const SPEED_OPTIONS = [0.5, 1, 2, 4];
+/** Default lookback window: 2 hours. */
+const WINDOW_MS = 2 * 3600_000;
+/** Real-time tick interval (ms). */
+const TICK_MS = 100;
+/** Number of frames to prefetch around the initial frame. */
 const INITIAL_FRAME_BUDGET = 20;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function nextLoadedIndex(loaded: Set<number>, current: number, frameCount: number, loop: boolean): number | null {
-  for (let i = current + 1; i < frameCount; i++) {
-    if (loaded.has(i)) return i;
-  }
-  if (loop) {
-    for (let i = 0; i <= current; i++) {
-      if (loaded.has(i)) return i;
-    }
-  }
-  return null;
-}
-
-function prevLoadedIndex(loaded: Set<number>, current: number, frameCount: number, loop: boolean): number | null {
-  for (let i = current - 1; i >= 0; i--) {
-    if (loaded.has(i)) return i;
-  }
-  if (loop) {
-    for (let i = frameCount - 1; i >= current; i--) {
-      if (loaded.has(i)) return i;
-    }
-  }
-  return null;
-}
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 /**
  * Multi-layer radar animation hook.
  *
- * Manages one frame cache + worker pool per radar layer while keeping a single
- * global AnimationState (speed, loop, frameIndex, frameCount).
- * On each tick, ALL active layers are advanced simultaneously.
+ * Manages one frame cache per radar layer while keeping a single global
+ * AnimationState driven by wall-clock time. On each tick all active layers
+ * show the frame whose timestamp is closest to (and ≤) the current playback time.
  */
 export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
   const { wasm } = useWasm();
@@ -107,18 +94,19 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
   // Per-layer data managed imperatively (no re-render on cache hits)
   const layerDataRef = useRef(new Map<string, LayerData>());
 
-  // Primary layer: the first enabled radar layer, used for frameCount/timestamps/loadedFrames
+  // Primary layer: the first enabled radar layer, drives loadedTimestampsMs
   const primaryIdRef = useRef<string | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [state, setState] = useState<AnimationState>({
     playing: false,
-    frameIndex: 0,
-    frameCount: 0,
+    playbackTimeMs: Date.now(),
+    windowStartMs: Date.now() - WINDOW_MS,
+    windowEndMs: Date.now(),
     speed: 1,
-    timestamps: [],
-    loadedFrames: new Set(),
+    allTimestampsMs: [],
+    loadedTimestampsMs: new Set(),
     ready: false,
     loop: true,
   });
@@ -138,44 +126,68 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
     };
   }, []);
 
-  // Teardown layers that have been removed
+  // Teardown layers that have been removed or disabled
   useEffect(() => {
     const activeIds = new Set(radarLayers.map((l) => l.id));
+    let changed = false;
     for (const [id] of layerDataRef.current.entries()) {
       if (!activeIds.has(id)) {
         wasmRef.current?.clear_frame_cache(id);
         layerDataRef.current.delete(id);
+        if (primaryIdRef.current === id) primaryIdRef.current = null;
+        changed = true;
       }
+    }
+    if (changed) {
+      // Re-elect primary to first remaining layer
+      if (primaryIdRef.current === null) {
+        const firstId = radarLayers[0]?.id ?? null;
+        primaryIdRef.current = firstId;
+      }
+      const newPrimary = primaryIdRef.current
+        ? layerDataRef.current.get(primaryIdRef.current)
+        : null;
+      const newLoaded = newPrimary
+        ? new Set([...newPrimary.loadedFrames].map((i) => newPrimary.timestampsMs[i]))
+        : new Set<number>();
+      setState((s) => ({
+        ...s,
+        allTimestampsMs: mergeAllTimestamps(),
+        loadedTimestampsMs: newLoaded,
+        ready: layerDataRef.current.size > 0 && (newPrimary?.initialLoaded ?? false),
+      }));
     }
   }, [radarLayers]);
 
-  // ── Apply frame to all layers ─────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
-  /**
-   * Apply a frame to the primary layer at `primaryFrameIndex`.
-   * Non-primary layers advance independently through their own loaded frames.
-   */
-  function applyFrame(primaryFrameIndex: number) {
+  /** Merge all layer timestamps into a sorted, deduplicated array. */
+  function mergeAllTimestamps(): number[] {
+    const all = new Set<number>();
+    for (const data of layerDataRef.current.values()) {
+      for (const ts of data.timestampsMs) all.add(ts);
+    }
+    return [...all].sort((a, b) => a - b);
+  }
+
+  // ── Apply frame to all layers at a given wall-clock time ──────────────────
+
+  function applyFrameAtTime(playbackTimeMs: number) {
     const w = wasmRef.current;
     if (!w) return;
-    const s = stateRef.current;
     for (const [layerId, data] of layerDataRef.current.entries()) {
       if (!data.initialLoaded || data.files.length === 0) continue;
-      if (layerId === primaryIdRef.current) {
-        if (data.loadedFrames.has(primaryFrameIndex)) {
-          w.apply_frame(layerId, data.files[primaryFrameIndex]);
-          data.currentFrameIndex = primaryFrameIndex;
+      // Find the latest LOADED frame whose timestamp ≤ playbackTimeMs
+      let best: number | null = null;
+      for (let i = data.timestampsMs.length - 1; i >= 0; i--) {
+        if (data.timestampsMs[i] <= playbackTimeMs && data.loadedFrames.has(i)) {
+          best = i;
+          break;
         }
-      } else {
-        // Advance this layer to its own next loaded frame
-        const next = nextLoadedIndex(
-          data.loadedFrames, data.currentFrameIndex,
-          Math.max(0, ...data.loadedFrames) + 1, s.loop
-        );
-        if (next !== null) {
-          w.apply_frame(layerId, data.files[next]);
-          data.currentFrameIndex = next;
-        }
+      }
+      if (best !== null) {
+        w.apply_frame(layerId, data.files[best]);
+        data.currentFrameIndex = best;
       }
     }
   }
@@ -191,39 +203,41 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
 
   function startTimer(speed: number) {
     stopTimer();
-    const intervalMs = 200 / speed;
+    // speed 1× = 1 radar-minute per real-second
+    // simulated ms advanced per TICK_MS of real time:
+    const simMsPerTick = speed * 60_000 * (TICK_MS / 1_000);
     timerRef.current = setInterval(() => {
       const s = stateRef.current;
-      if (s.frameCount === 0 || s.loadedFrames.size < 2) return;
+      if (!s.ready) return;
 
-      const next = nextLoadedIndex(s.loadedFrames, s.frameIndex, s.frameCount, s.loop);
-      if (next === null) {
-        stopTimer();
-        setState((prev) => ({ ...prev, playing: false }));
-        return;
+      let next = s.playbackTimeMs + simMsPerTick;
+      if (next > s.windowEndMs) {
+        if (s.loop) {
+          next = s.windowStartMs;
+        } else {
+          stopTimer();
+          setState((p) => ({ ...p, playing: false }));
+          return;
+        }
       }
-
-      applyFrame(next);
-      setState((prev) => ({ ...prev, frameIndex: next }));
-    }, intervalMs);
+      applyFrameAtTime(next);
+      setState((p) => ({ ...p, playbackTimeMs: next }));
+    }, TICK_MS);
   }
 
   // ── Public controls ───────────────────────────────────────────────────────
 
   const play = useCallback(() => {
     setState((s) => {
-      if (s.frameCount === 0 || s.loadedFrames.size < 2) return s;
-
-      let startIdx = s.frameIndex;
-      const next = nextLoadedIndex(s.loadedFrames, s.frameIndex, s.frameCount, false);
-      if (next === null) {
-        const sorted = [...s.loadedFrames].sort((a, b) => a - b);
-        startIdx = sorted[0];
-        applyFrame(startIdx);
+      if (!s.ready) return s;
+      // If already at the end and not looping, rewind to start
+      let startTime = s.playbackTimeMs;
+      if (startTime >= s.windowEndMs && !s.loop) {
+        startTime = s.windowStartMs;
+        applyFrameAtTime(startTime);
       }
-
       startTimer(s.speed);
-      return { ...s, playing: true, frameIndex: startIdx };
+      return { ...s, playing: true, playbackTimeMs: startTime };
     });
   }, []);
 
@@ -237,38 +251,37 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
     else play();
   }, [play, pause]);
 
-  const nextFrame = useCallback(() => {
+  const stepForward = useCallback(() => {
     const s = stateRef.current;
-    if (s.frameCount === 0) return;
-    const next = nextLoadedIndex(s.loadedFrames, s.frameIndex, s.frameCount, s.loop);
+    if (!s.ready) return;
+    // Advance to the next timestamp in the union that is after current playback time
+    const next = s.allTimestampsMs.find((ts) => ts > s.playbackTimeMs) ?? null;
     if (next === null) return;
-    applyFrame(next);
-    setState((prev) => ({ ...prev, frameIndex: next }));
+    applyFrameAtTime(next);
+    setState((p) => ({ ...p, playbackTimeMs: next }));
   }, []);
 
-  const prevFrame = useCallback(() => {
+  const stepBack = useCallback(() => {
     const s = stateRef.current;
-    if (s.frameCount === 0) return;
-    const prev = prevLoadedIndex(s.loadedFrames, s.frameIndex, s.frameCount, s.loop);
-    if (prev === null) return;
-    applyFrame(prev);
-    setState((p) => ({ ...p, frameIndex: prev }));
-  }, []);
-
-  const seekTo = useCallback((index: number) => {
-    const s = stateRef.current;
-    if (s.frameCount === 0) return;
-    const clamped = Math.max(0, Math.min(s.frameCount - 1, index));
-    if (s.loadedFrames.has(clamped)) {
-      applyFrame(clamped);
-      setState((prev) => ({ ...prev, frameIndex: clamped }));
-    } else {
-      const next = nextLoadedIndex(s.loadedFrames, clamped - 1, s.frameCount, false);
-      if (next !== null) {
-        applyFrame(next);
-        setState((prev) => ({ ...prev, frameIndex: next }));
+    if (!s.ready) return;
+    // Find the latest timestamp strictly before current playback time
+    let prev: number | null = null;
+    for (let i = s.allTimestampsMs.length - 1; i >= 0; i--) {
+      if (s.allTimestampsMs[i] < s.playbackTimeMs) {
+        prev = s.allTimestampsMs[i];
+        break;
       }
     }
+    if (prev === null) return;
+    applyFrameAtTime(prev);
+    setState((p) => ({ ...p, playbackTimeMs: prev! }));
+  }, []);
+
+  const seekToTime = useCallback((ms: number) => {
+    const s = stateRef.current;
+    const clamped = Math.max(s.windowStartMs, Math.min(s.windowEndMs, ms));
+    applyFrameAtTime(clamped);
+    setState((p) => ({ ...p, playbackTimeMs: clamped }));
   }, []);
 
   const setSpeed = useCallback((speed: number) => {
@@ -296,10 +309,15 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
   }, []);
 
   /**
-   * Initialize or re-initialize a layer with a new site.
-   * Called when the user selects a site in the sidebar.
+   * Initialize or re-initialize a layer with a new site and/or end time.
+   * Called when the user selects a site or changes the time window.
    */
-  const initLayer = useCallback((layerId: string, siteId: string) => {
+  const initLayer = useCallback((
+    layerId: string,
+    siteId: string,
+    endTime: Date = new Date(),
+    windowMs: number = WINDOW_MS,
+  ) => {
     const w = wasmRef.current;
     if (!w) return;
 
@@ -309,14 +327,21 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
       w.clear_frame_cache(layerId);
     }
 
-    const isPrimary = layerDataRef.current.size === 0 || layerId === primaryIdRef.current || primaryIdRef.current === null;
+    const isPrimary =
+      layerDataRef.current.size === 0 ||
+      layerId === primaryIdRef.current ||
+      primaryIdRef.current === null;
     if (isPrimary) primaryIdRef.current = layerId;
 
     stopTimer();
 
+    const windowEndMs = endTime.getTime();
+    const windowStartMs = windowEndMs - windowMs;
+
     const layerData: LayerData = {
       siteId,
       files: [],
+      timestampsMs: [],
       loadedFrames: new Set(),
       initialLoaded: false,
       currentFrameIndex: 0,
@@ -328,41 +353,38 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
       setState((s) => ({
         ...s,
         playing: false,
-        frameIndex: 0,
-        frameCount: 0,
-        timestamps: [],
-        loadedFrames: new Set(),
+        playbackTimeMs: windowEndMs,
+        windowStartMs,
+        windowEndMs,
+        allTimestampsMs: [],
+        loadedTimestampsMs: new Set(),
         ready: false,
       }));
     }
 
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    const date = `${y}/${m}/${day}`;
-
-    w.list_radar_frames(siteId, date)
-      .then((json: string) => {
-        const data = JSON.parse(json) as { files: string[]; timestamps: string[]; count: number };
-
+    fetchFramesForWindow(w, siteId, windowStartMs, windowEndMs)
+      .then(({ files, timestampsMs }) => {
         // Guard: if this layer was re-initialized before response arrived, discard
         const current = layerDataRef.current.get(layerId);
         if (!current || current.siteId !== siteId) return;
 
-        const { files, timestamps, count } = data;
+        const count = files.length;
         const latestIdx = count > 0 ? count - 1 : 0;
 
         current.files = files;
+        current.timestampsMs = timestampsMs;
         current.currentFrameIndex = latestIdx;
 
         if (isPrimary) {
           setState((s) => ({
             ...s,
-            frameCount: count,
-            timestamps,
+            allTimestampsMs: mergeAllTimestamps(),
             ready: count > 0,
-            frameIndex: latestIdx,
+          }));
+        } else {
+          setState((s) => ({
+            ...s,
+            allTimestampsMs: mergeAllTimestamps(),
           }));
         }
 
@@ -379,14 +401,14 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
 
             if (isPrimary) {
               setState((s) => {
-                const loaded = new Set(s.loadedFrames);
-                loaded.add(latestIdx);
-                return { ...s, loadedFrames: loaded, ready: true };
+                const loaded = new Set(s.loadedTimestampsMs);
+                loaded.add(timestampsMs[latestIdx]);
+                return { ...s, loadedTimestampsMs: loaded, ready: true };
               });
             }
           })
           .catch((err: unknown) => {
-            console.error(`[useMultiLayerAnimation] initLayer(${layerId}) failed:`, err);
+            console.error(`[useMultiLayerAnimation] initLayer(${layerId}) initial fetch failed:`, err);
           });
 
         // Prefetch remaining frames in the budget
@@ -406,19 +428,19 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
 
               if (isPrimary) {
                 setState((s) => {
-                  const loaded = new Set(s.loadedFrames);
-                  loaded.add(idx);
-                  return { ...s, loadedFrames: loaded };
+                  const loaded = new Set(s.loadedTimestampsMs);
+                  loaded.add(cur.timestampsMs[idx]);
+                  return { ...s, loadedTimestampsMs: loaded };
                 });
               }
             })
             .catch(() => {
-              // Skip failed frames
+              // Skip failed frames silently
             });
         }
       })
       .catch((err: unknown) => {
-        console.error(`[useMultiLayerAnimation] initLayer(${layerId}) failed:`, err);
+        console.error(`[useMultiLayerAnimation] initLayer(${layerId}) frame list failed:`, err);
       });
   }, []);
 
@@ -427,9 +449,9 @@ export function useMultiLayerAnimation(radarLayers: RadarLayer[]) {
     play,
     pause,
     togglePlay,
-    nextFrame,
-    prevFrame,
-    seekTo,
+    stepForward,
+    stepBack,
+    seekToTime,
     setSpeed,
     cycleSpeed,
     setLoop,
