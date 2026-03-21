@@ -1,6 +1,5 @@
 import { useState } from "react";
 import styled from "@emotion/styled";
-import { ChevronRight, ChevronLeft, Layers } from "lucide-react";
 import { theme } from "./theme";
 import type { AnimationState } from "../../hooks/useMultiLayerAnimation";
 import type { LayerBase } from "../../plugins/registry";
@@ -8,8 +7,6 @@ import { getPlugin, getPlugins } from "../../plugins/registry";
 
 interface SidebarProps {
   animationState: AnimationState;
-  onSetSpeed: (speed: number) => void;
-  onToggleLoop: () => void;
   layers: LayerBase[];
   addLayer: (kind: string) => string;
   removeLayer: (id: string) => void;
@@ -18,8 +15,6 @@ interface SidebarProps {
 
 export function Sidebar({
   animationState,
-  onSetSpeed,
-  onToggleLoop,
   layers,
   addLayer,
   removeLayer,
@@ -32,16 +27,13 @@ export function Sidebar({
     return (
       <Collapsed>
         <CollapseBtn title="Expand sidebar" onClick={() => setExpanded(true)}>
-          <ChevronRight size={14} strokeWidth={1.5} />
+          <MSIcon>chevron_right</MSIcon>
         </CollapseBtn>
-        <IconStub title="Layers">
-          <Layers size={14} strokeWidth={1.5} />
-        </IconStub>
+        <MSIcon style={{ color: theme.textDim, fontSize: 18 }}>layers</MSIcon>
       </Collapsed>
     );
   }
 
-  // Plugins available to add (non-singleton, or singleton not yet added)
   const addablePlugins = getPlugins().filter((p) => {
     if (p.singleton && layers.some((l) => l.kind === p.kind)) return false;
     return true;
@@ -49,17 +41,20 @@ export function Sidebar({
 
   return (
     <Panel>
-      <CollapseRow>
-        <SectionLabel>Controls</SectionLabel>
+      {/* Header */}
+      <Header>
+        <HeaderLeft>
+          <Branding>radish</Branding>
+          <HeaderDivider />
+          <HeaderLabel>LAYERS</HeaderLabel>
+        </HeaderLeft>
         <CollapseBtn title="Collapse sidebar" onClick={() => setExpanded(false)}>
-          <ChevronLeft size={14} strokeWidth={1.5} />
+          <MSIcon>chevron_left</MSIcon>
         </CollapseBtn>
-      </CollapseRow>
+      </Header>
 
-      {/* Layers */}
-      <Section>
-        <SectionLabel>Layers</SectionLabel>
-
+      {/* Layer list */}
+      <LayerList>
         {layers.map((layer) => {
           const plugin = getPlugin(layer.kind);
           if (!plugin) return null;
@@ -79,9 +74,17 @@ export function Sidebar({
           );
         })}
 
-        {/* Add layer menu */}
+        {/* Detail panels from plugins */}
+        {getPlugins()
+          .filter((p) => p.DetailPanel)
+          .map((p) => {
+            const DetailPanel = p.DetailPanel!;
+            return <DetailPanel key={p.kind} onDismiss={() => {}} />;
+          })}
+
+        {/* Add layer button */}
         <AddLayerWrap>
-          <AddLayerBtn onClick={() => setMenuOpen((o) => !o)}>+ Add Layer</AddLayerBtn>
+          <AddLayerBtn onClick={() => setMenuOpen((o) => !o)}>+ ADD RADAR SITE</AddLayerBtn>
           {menuOpen && addablePlugins.length > 0 && (
             <AddLayerMenu>
               {addablePlugins.map((p) => (
@@ -98,46 +101,15 @@ export function Sidebar({
             </AddLayerMenu>
           )}
         </AddLayerWrap>
-      </Section>
+      </LayerList>
 
-      {/* Detail panels from plugins */}
-      {getPlugins()
-        .filter((p) => p.DetailPanel)
-        .map((p) => {
-          const Panel = p.DetailPanel!;
-          return <Panel key={p.kind} onDismiss={() => {}} />;
-        })}
-
-      {/* Animation */}
+      {/* Bottom: frame count */}
       {animationState.ready && (
-        <Section>
-          <SectionLabel>Animation</SectionLabel>
-          <SliderHeader>
-            <SubLabel>Speed</SubLabel>
-            <SliderValue>{animationState.speed}&times;</SliderValue>
-          </SliderHeader>
-          <Slider
-            type="range"
-            min={0.5}
-            max={4}
-            step={0.5}
-            value={animationState.speed}
-            onChange={(e) => onSetSpeed(Number(e.target.value))}
-          />
-          <LoopRow>
-            <LoopLabel>Loop</LoopLabel>
-            <LoopToggle
-              active={animationState.loop}
-              onClick={onToggleLoop}
-              title={animationState.loop ? "Loop enabled" : "Loop disabled"}
-            >
-              {animationState.loop ? "ON" : "OFF"}
-            </LoopToggle>
-          </LoopRow>
+        <BottomSection>
           <FrameCountLabel>
-            {animationState.loadedTimestampsMs.size} / {animationState.allTimestampsMs.length} frames loaded
+            {animationState.loadedTimestampsMs.size} / {animationState.allTimestampsMs.length} frames
           </FrameCountLabel>
-        </Section>
+        </BottomSection>
       )}
     </Panel>
   );
@@ -145,7 +117,7 @@ export function Sidebar({
 
 // ── Styled components ─────────────────────────────────────────────────────────
 
-const PANEL_W = "220px";
+const PANEL_W = "256px";
 const COLLAPSED_W = "36px";
 
 const Panel = styled.div`
@@ -156,7 +128,7 @@ const Panel = styled.div`
   border-right: 1px solid ${theme.border};
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
   pointer-events: all;
   flex-shrink: 0;
 `;
@@ -170,65 +142,81 @@ const Collapsed = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 4px;
+  padding-top: 8px;
   gap: 8px;
   pointer-events: all;
   flex-shrink: 0;
 `;
 
-const CollapseRow = styled.div`
+const Header = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid ${theme.border};
+  flex-shrink: 0;
+`;
+
+const HeaderLeft = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const Branding = styled.span`
+  font-family: ${theme.fontHeadline};
+  font-size: 14px;
+  font-weight: 700;
+  font-style: italic;
+  color: ${theme.accent};
+  letter-spacing: -0.01em;
+`;
+
+const HeaderDivider = styled.div`
+  width: 1px;
+  height: 12px;
+  background: ${theme.border};
+`;
+
+const HeaderLabel = styled.span`
+  font-family: ${theme.fontHeadline};
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: ${theme.textDim};
+  text-transform: uppercase;
 `;
 
 const CollapseBtn = styled.button`
   background: none;
   border: none;
-  color: ${theme.textSecondary};
-  cursor: pointer;
-  padding: 2px 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  &:hover { color: ${theme.textPrimary}; }
-`;
-
-const IconStub = styled.button`
-  background: none;
-  border: none;
   color: ${theme.textDim};
   cursor: pointer;
-  opacity: 0.5;
   padding: 2px;
   display: flex;
   align-items: center;
   justify-content: center;
-  &:hover { opacity: 0.9; }
+
+  &:hover {
+    color: ${theme.textSecondary};
+  }
 `;
 
-const Section = styled.div`
-  padding: 10px;
-  border-bottom: 1px solid ${theme.border};
+function MSIcon({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <span className="material-symbols-outlined" style={{ fontSize: 20, lineHeight: 1, ...style }}>
+      {children}
+    </span>
+  );
+}
+
+const LayerList = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-`;
-
-const SectionLabel = styled.span`
-  font-family: ${theme.fontSans};
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: ${theme.textDim};
-`;
-
-const SubLabel = styled.span`
-  font-family: ${theme.fontSans};
-  font-size: 10px;
-  color: ${theme.textSecondary};
 `;
 
 const AddLayerWrap = styled.div`
@@ -240,12 +228,15 @@ const AddLayerBtn = styled.button`
   border: 1px dashed ${theme.border};
   border-radius: ${theme.radius};
   color: ${theme.textDim};
-  font-family: ${theme.fontSans};
-  font-size: 11px;
-  padding: 4px 8px;
+  font-family: ${theme.fontHeadline};
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  padding: 6px 8px;
   cursor: pointer;
   text-align: left;
   width: 100%;
+
   &:hover {
     border-color: ${theme.accent};
     color: ${theme.accent};
@@ -259,7 +250,7 @@ const AddLayerMenu = styled.div`
   right: 0;
   margin-top: 2px;
   padding: 4px 0;
-  background: ${theme.bgSolid};
+  background: ${theme.surfaceLow};
   border: 1px solid ${theme.border};
   border-radius: ${theme.radius};
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
@@ -277,56 +268,24 @@ const AddLayerMenuItem = styled.button`
   font-size: 11px;
   color: ${theme.textPrimary};
   cursor: pointer;
+
   &:hover {
     background: ${theme.bgHover};
     color: ${theme.accent};
   }
 `;
 
-const SliderHeader = styled.div`
+const BottomSection = styled.div`
+  border-top: 1px solid ${theme.border};
+  padding: 8px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-`;
-
-const SliderValue = styled.span`
-  font-family: ${theme.fontMono};
-  font-size: 11px;
-  color: ${theme.accent};
-`;
-
-const Slider = styled.input`
-  width: 100%;
-  accent-color: ${theme.accent};
-  cursor: pointer;
-`;
-
-const LoopRow = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-`;
-
-const LoopLabel = styled.span`
-  font-family: ${theme.fontSans};
-  font-size: 11px;
-  color: ${theme.textSecondary};
-`;
-
-const LoopToggle = styled.button<{ active?: boolean }>`
-  background: ${({ active }) => (active ? theme.bgActive : "rgba(255,255,255,0.04)")};
-  border: 1px solid ${({ active }) => (active ? theme.accent : theme.border)};
-  border-radius: ${theme.radius};
-  color: ${({ active }) => (active ? theme.accent : theme.textDim)};
-  font-family: ${theme.fontMono};
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 8px;
-  cursor: pointer;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
 `;
 
 const FrameCountLabel = styled.span`
   font-family: ${theme.fontMono};
-  font-size: 10px;
+  font-size: 9px;
   color: ${theme.textDim};
 `;

@@ -6,11 +6,9 @@ import { useMultiLayerAnimation } from "../../hooks/useMultiLayerAnimation";
 import { usePinchZoom } from "../../hooks/usePinchZoom";
 import { getPlugin } from "../../plugins/registry";
 import type { LayerBase, PluginContext } from "../../plugins/registry";
-import { TopBar } from "./TopBar";
 import { Sidebar } from "./Sidebar";
-import { CanvasButtons } from "./CanvasButtons";
-import { ReflectivityLegend } from "./ReflectivityLegend";
-import { ScrubBar } from "./ScrubBar";
+import { CanvasHUD } from "./CanvasHUD";
+import { PlaybackFooter } from "./PlaybackFooter";
 
 // ── Per-layer effect runner ──────────────────────────────────────────────────
 
@@ -25,10 +23,7 @@ function LayerEffectRunner({ layer, ctx }: { layer: LayerBase; ctx: PluginContex
 export function NexradHUD() {
   usePinchZoom();
 
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  void sidebarOpen;
-
-  const { wasm, sendCommand, isReady, subscribe } = useWasm();
+  const { wasm, sendCommand, isReady, subscribe, uiState } = useWasm();
   const { layers, addLayer, removeLayer, updateLayer } = useLayers();
 
   // Global time window state
@@ -94,55 +89,46 @@ export function NexradHUD() {
       const newId = addLayerRef.current("radar-l2");
       if (newId) {
         updateLayerRef.current(newId, { siteId });
-        // initLayer will be triggered by the useEffect above when siteId propagates
       }
     });
   }, [subscribe]);
 
-  const { windowStartMs, windowEndMs, playbackTimeMs, allTimestampsMs, loadedTimestampsMs } = anim.state;
+  const { windowStartMs, windowEndMs, allTimestampsMs, loadedTimestampsMs } = anim.state;
 
   return (
     <Root>
-      <TopBar
-        onSiteClick={() => setSidebarOpen((v) => !v)}
+      <Sidebar
+        animationState={anim.state}
+        layers={layers}
+        addLayer={addLayer}
+        removeLayer={removeLayer}
+        updateLayer={updateLayer}
+      />
+
+      <RightCol>
+        <CanvasArea>
+          <CanvasHUD
+            radarLayers={uiState.radar_layers}
+            loadedTimestampsMs={loadedTimestampsMs}
+            allTimestampsMs={allTimestampsMs}
+          />
+        </CanvasArea>
+      </RightCol>
+
+      <PlaybackFooter
         animation={anim.state}
         onTogglePlay={anim.togglePlay}
         onStepBack={anim.stepBack}
         onStepForward={anim.stepForward}
         onSeekStart={() => anim.seekToTime(windowStartMs)}
         onSeekEnd={() => anim.seekToTime(windowEndMs)}
-        onCycleSpeed={anim.cycleSpeed}
+        onSetSpeed={anim.setSpeed}
+        onSeek={anim.seekToTime}
         endTime={endTime}
         liveMode={liveMode}
         onEndTimeChange={handleEndTimeChange}
         onGoLive={handleGoLive}
       />
-
-      <Body>
-        <Sidebar
-          animationState={anim.state}
-          onSetSpeed={anim.setSpeed}
-          onToggleLoop={anim.toggleLoop}
-          layers={layers}
-          addLayer={addLayer}
-          removeLayer={removeLayer}
-          updateLayer={updateLayer}
-        />
-        <CanvasArea>
-          <CanvasButtons />
-          <ScrubBarWrap>
-            <ScrubBar
-              windowStartMs={windowStartMs}
-              windowEndMs={windowEndMs}
-              playbackTimeMs={playbackTimeMs}
-              allTimestampsMs={allTimestampsMs}
-              loadedTimestampsMs={loadedTimestampsMs}
-              onSeek={anim.seekToTime}
-            />
-          </ScrubBarWrap>
-          <ReflectivityLegend />
-        </CanvasArea>
-      </Body>
 
       {/* Run per-layer plugin effects */}
       {layers.map((layer) => (
@@ -158,25 +144,20 @@ const Root = styled.div`
   z-index: 10;
   pointer-events: none;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  overflow: hidden;
 `;
 
-const Body = styled.div`
+const RightCol = styled.div`
   flex: 1;
   display: flex;
-  overflow: hidden;
-  margin-top: 36px;
+  flex-direction: column;
+  padding-bottom: 48px;
+  min-width: 0;
 `;
 
 const CanvasArea = styled.div`
   flex: 1;
   position: relative;
-`;
-
-const ScrubBarWrap = styled.div`
-  position: absolute;
-  bottom: 32px;
-  left: 0;
-  right: 0;
-  pointer-events: all;
+  overflow: hidden;
 `;

@@ -1,6 +1,5 @@
 import { useState } from "react";
 import styled from "@emotion/styled";
-import { ChevronRight, X } from "lucide-react";
 import { theme } from "./theme";
 
 interface LayerCardProps {
@@ -29,7 +28,7 @@ export function LayerCard({
   const hasConfig = !!children;
 
   return (
-    <Card disabled={disabled}>
+    <Card disabled={disabled} active={enabled && !disabled}>
       <Header>
         <ToggleBtn
           active={enabled && !disabled}
@@ -43,7 +42,9 @@ export function LayerCard({
           }
           style={{ cursor: disabled ? "default" : "pointer" }}
         >
-          <ToggleDot active={enabled && !disabled} />
+          <MSIcon active={enabled && !disabled}>
+            {enabled && !disabled ? "visibility" : "visibility_off"}
+          </MSIcon>
         </ToggleBtn>
         <Label active={enabled && !disabled}>{label}</Label>
         {hasConfig && !disabled && (
@@ -52,12 +53,12 @@ export function LayerCard({
             onClick={() => setExpanded((v) => !v)}
             title={expanded ? "Collapse" : "Expand"}
           >
-            <ChevronRight size={12} strokeWidth={1.5} />
+            <MSIcon>chevron_right</MSIcon>
           </ChevronBtn>
         )}
         {onRemove && !disabled && (
           <RemoveBtn onClick={onRemove} title="Remove layer">
-            <X size={11} strokeWidth={1.5} />
+            <MSIcon>close</MSIcon>
           </RemoveBtn>
         )}
       </Header>
@@ -66,17 +67,19 @@ export function LayerCard({
   );
 }
 
-const Card = styled.div<{ disabled?: boolean }>`
+const Card = styled.div<{ disabled?: boolean; active?: boolean }>`
   display: flex;
   flex-direction: column;
   opacity: ${({ disabled }) => (disabled ? 0.4 : 1)};
+  border: 1px solid ${({ active }) => (active ? `${theme.accent}20` : theme.border)};
+  background: ${theme.surfaceLow};
 `;
 
 const Header = styled.div`
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 0;
+  gap: 4px;
+  padding: 5px 6px;
 `;
 
 const ToggleBtn = styled.button<{ active?: boolean }>`
@@ -87,30 +90,39 @@ const ToggleBtn = styled.button<{ active?: boolean }>`
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
   color: ${({ active }) => (active ? theme.accent : theme.textDim)};
   flex-shrink: 0;
+
   &:hover {
     color: ${({ active }) => (active ? theme.accentHover : theme.textSecondary)};
   }
 `;
 
-const ToggleDot = styled.span<{ active?: boolean }>`
-  display: block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: ${({ active }) => (active ? "currentColor" : "transparent")};
-  border: 1px solid currentColor;
-  flex-shrink: 0;
+function MSIcon({ children, active, expanded }: { children: React.ReactNode; active?: boolean; expanded?: boolean }) {
+  return (
+    <MSIconSpan active={active} expanded={expanded} className="material-symbols-outlined">
+      {children}
+    </MSIconSpan>
+  );
+}
+
+const MSIconSpan = styled.span<{ active?: boolean; expanded?: boolean }>`
+  font-size: 16px;
+  line-height: 1;
+  ${({ expanded }) => expanded !== undefined && `
+    transform: rotate(${expanded ? "90deg" : "0deg"});
+    transition: transform 0.15s ease;
+    display: inline-block;
+  `}
 `;
 
 const Label = styled.span<{ active?: boolean }>`
-  font-family: ${theme.fontSans};
-  font-size: 12px;
+  font-family: ${theme.fontHeadline};
+  font-size: 11px;
+  font-weight: 600;
   color: ${({ active }) => (active ? theme.textPrimary : theme.textDim)};
   flex: 1;
+  letter-spacing: 0.02em;
 `;
 
 const ChevronBtn = styled.button<{ expanded?: boolean }>`
@@ -122,9 +134,8 @@ const ChevronBtn = styled.button<{ expanded?: boolean }>`
   align-items: center;
   justify-content: center;
   color: ${theme.textDim};
-  transform: rotate(${({ expanded }) => (expanded ? "90deg" : "0deg")});
-  transition: transform 0.15s ease;
   flex-shrink: 0;
+
   &:hover {
     color: ${theme.textSecondary};
   }
@@ -140,8 +151,9 @@ const RemoveBtn = styled.button`
   justify-content: center;
   color: ${theme.textDim};
   flex-shrink: 0;
+
   &:hover {
-    color: #e05555;
+    color: ${theme.error};
   }
 `;
 
@@ -149,7 +161,6 @@ const Body = styled.div`
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 6px 0 4px 14px;
-  border-left: 1px solid ${theme.border};
-  margin-left: 3px;
+  padding: 6px 8px 6px 8px;
+  border-top: 1px solid ${theme.border};
 `;

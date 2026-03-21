@@ -1,20 +1,24 @@
 import colormap from "../../../radish/nws_colormap.json";
 
 export const theme = {
-  bg: "rgba(10, 12, 18, 0.90)",
-  bgSolid: "#0a0c12",
+  bg: "rgba(17, 19, 24, 0.60)",
+  bgSolid: "#0c0e12",
   bgHover: "rgba(255, 255, 255, 0.06)",
-  bgActive: "rgba(26, 127, 232, 0.20)",
-  border: "rgba(255, 255, 255, 0.08)",
-  accent: "#1a7fe8",
-  accentHover: "#2490f5",
-  textPrimary: "#e8ecf0",
-  textSecondary: "#8a9ab0",
-  textDim: "#4a5568",
+  bgActive: "rgba(63, 255, 139, 0.12)",
+  border: "rgba(70, 72, 77, 0.2)",
+  accent: "#3fff8b",
+  accentHover: "#13ea79",
+  textPrimary: "#f6f6fc",
+  textSecondary: "#aaabb0",
+  textDim: "#46484d",
   blur: "blur(8px)",
-  radius: "3px",
-  fontMono: "'JetBrains Mono', 'SF Mono', 'Fira Mono', monospace",
+  radius: "0px",
+  fontHeadline: "'Space Grotesk', system-ui, sans-serif",
+  fontMono: "'JetBrains Mono', 'SF Mono', monospace",
   fontSans: "Inter, system-ui, sans-serif",
+  surface: "#111318",
+  surfaceLow: "#171a1f",
+  error: "#ff716c",
 } as const;
 
 type RawColorPoint = { dbz: number; r: number; g: number; b: number; a: number };
