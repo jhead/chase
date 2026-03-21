@@ -11,25 +11,25 @@
     "build:wasm": "cargo build --release --target wasm32-unknown-unknown -p radish-worker && wasm-bindgen --target bundler --out-dir src/wasm-worker target/wasm32-unknown-unknown/release/radish_worker.wasm && cargo build --release --target wasm32-unknown-unknown -p radish-web && wasm-bindgen --target bundler --out-dir src/wasm target/wasm32-unknown-unknown/release/radish_web.wasm"
   },
   "dependencies": {
-    "@emotion/react": "^11.11.4",
-    "@emotion/styled": "^11.11.5",
-    "hls.js": "^1.5.8",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "hls.js": "^1.6.15",
     "lucide-react": "^0.577.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "eslint": "^10.0.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "eslint": "^10.1.0",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.5.0",
+    "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
-    "typescript": "^5.2.2",
-    "typescript-eslint": "^8.0.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.1",
     "vite": "^7.3.1",
-    "vite-plugin-wasm": "^3.5.0"
+    "vite-plugin-wasm": "^3.6.0"
   }
 }
