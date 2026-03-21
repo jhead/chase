@@ -1,0 +1,7 @@
+{
+  "name": "@jhead/radish-layer-radar-l2-live",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts"
+}

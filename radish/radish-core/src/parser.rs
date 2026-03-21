@@ -69,7 +69,7 @@ where
 /// Convert one `nexrad_model` sweep into our `ElevationScan`.
 ///
 /// Returns `None` if the sweep has no radials with reflectivity data.
-fn sweep_to_elevation_scan(sweep: &Sweep) -> Option<ElevationScan> {
+pub fn sweep_to_elevation_scan(sweep: &Sweep) -> Option<ElevationScan> {
     let radials = sweep.radials();
     if radials.is_empty() {
         return None;
