@@ -15,10 +15,9 @@ export interface NexradWasm {
   send_command: (json: string) => void;
   set_event_callback: (cb: (eventJson: string) => void) => void;
   update_layer_texture: (layer_id: string, num_rays: number, num_gates: number, data: Uint8Array) => void;
-  // Direct S3 fetch/parse
   list_radar_frames: (site: string, date: string) => Promise<string>;
-  load_frame: (layer_id: string, key: string) => Promise<void>;
-  load_initial_frame: (layer_id: string, key: string, site_id: string) => Promise<void>;
+  receive_radar_volume: (layer_id: string, key: string, site_id: string, bytes: Uint8Array) => void;
+  cache_radar_frame: (layer_id: string, key: string, bytes: Uint8Array) => void;
   apply_frame: (layer_id: string, key: string) => void;
   clear_frame_cache: (layer_id: string) => void;
 }
