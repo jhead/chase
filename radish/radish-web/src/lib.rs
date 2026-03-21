@@ -367,3 +367,43 @@ pub fn clear_frame_cache(layer_id: &str) {
         cache.remove(layer_id);
     }
 }
+
+// ── Live radar functions ──────────────────────────────────────────────────
+
+/// Receive a postcard-encoded `RadarVolume` from the live stream worker.
+/// Updates both the animation frame slot (for immediate texture update) and
+/// sends the volume to Bevy for mesh creation/update.
+#[wasm_bindgen]
+pub fn apply_live_scan(layer_id: String, site_id: String, bytes: &[u8]) -> Result<(), JsValue> {
+    let mut volume: RadarVolume = postcard::from_bytes(bytes)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    if volume.elevations.is_empty() {
+        return Err(JsValue::from_str("no elevation scans in live volume"));
+    }
+
+    let elev = volume.elevations.remove(0);
+    let frame = elevation_to_frame(&elev);
+
+    // Update the animation frame slot for immediate texture display
+    if let Some(slots) = ANIM_SLOTS.get() {
+        let slot = slots.slot_for(&layer_id);
+        if let Ok(mut g) = slot.write() {
+            *g = Some(frame);
+        }
+    }
+
+    // Send the volume to Bevy for mesh creation (first time) or update
+    let tagged = TaggedVolume {
+        layer_id: layer_id.clone(),
+        volume: RadarVolume {
+            site: site_id,
+            elevations: vec![elev],
+        },
+    };
+    if let Some(tx) = VOLUME_TX.get() {
+        let _ = tx.try_send(tagged);
+    }
+
+    Ok(())
+}

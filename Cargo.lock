@@ -4088,7 +4088,10 @@ dependencies = [
  "log",
  "nexrad-decode",
  "nexrad-model",
+ "once_cell",
+ "reqwest",
  "thiserror 2.0.18",
+ "xml",
  "zerocopy",
 ]
 
@@ -4956,11 +4959,14 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
+ "log",
+ "nexrad-data",
  "postcard",
  "radish-core",
  "radish-fetch",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -7497,6 +7503,12 @@ name = "xkeysym"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
+
+[[package]]
+name = "xml"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8aa498d22c9bbaf482329839bc5620c46be275a19a812e9a22a2b07529a642a"
 
 [[package]]
 name = "xml-rs"

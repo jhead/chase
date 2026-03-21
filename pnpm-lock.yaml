@@ -70,6 +70,8 @@ importers:
 
   plugins/layer-radar-l2: {}
 
+  plugins/layer-radar-l2-live: {}
+
   plugins/layer-radar-sites: {}
 
 packages:

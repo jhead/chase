@@ -20,6 +20,7 @@ export interface NexradWasm {
   cache_radar_frame: (layer_id: string, key: string, bytes: Uint8Array) => void;
   apply_frame: (layer_id: string, key: string) => void;
   clear_frame_cache: (layer_id: string) => void;
+  apply_live_scan: (layer_id: string, site_id: string, bytes: Uint8Array) => void;
 }
 
 /** Per-layer state snapshot pushed from Bevy. */

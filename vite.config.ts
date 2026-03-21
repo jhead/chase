@@ -11,6 +11,7 @@ export default defineConfig({
     alias: {
       "@jhead/radish-layer-basemap": path.resolve(__dirname, "plugins/layer-basemap/src"),
       "@jhead/radish-layer-radar-l2": path.resolve(__dirname, "plugins/layer-radar-l2/src"),
+      "@jhead/radish-layer-radar-l2-live": path.resolve(__dirname, "plugins/layer-radar-l2-live/src"),
       "@jhead/radish-layer-noaa-alerts": path.resolve(__dirname, "plugins/layer-noaa-alerts/src"),
       "@jhead/radish-layer-radar-sites": path.resolve(__dirname, "plugins/layer-radar-sites/src"),
     },

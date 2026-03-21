@@ -11,6 +11,7 @@ export const receive_radar_volume: (a: number, b: number, c: number, d: number, 
 export const cache_radar_frame: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const apply_frame: (a: number, b: number, c: number, d: number) => void;
 export const clear_frame_cache: (a: number, b: number) => void;
+export const apply_live_scan: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const set_event_callback: (a: any) => void;
 export const wasm_bindgen__closure__destroy__he1b60c02cc3d842b: (a: number, b: number) => void;
 export const wasm_bindgen__closure__destroy__h27af1861dd8128de: (a: number, b: number) => void;

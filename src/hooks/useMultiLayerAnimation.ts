@@ -1,36 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useWasm } from "../ctx/WasmContext";
 import { fetchFramesForWindow } from "../utils/fetchFramesForWindow";
-
-// ── Radar fetch worker ────────────────────────────────────────────────────────
-
-let _workerNextId = 0;
-const _workerPending = new Map<
-  number,
-  { resolve: (b: Uint8Array) => void; reject: (e: Error) => void }
->();
-
-const _radarWorker = new Worker(
-  new URL("../workers/radarFetchWorker.ts", import.meta.url),
-  { type: "module" }
-);
-
-_radarWorker.onmessage = (e: MessageEvent) => {
-  const { type, id, bytes, message } = e.data;
-  const p = _workerPending.get(id);
-  if (!p) return;
-  _workerPending.delete(id);
-  if (type === "result") p.resolve(bytes as Uint8Array);
-  else p.reject(new Error(message as string));
-};
-
-function workerFetch(key: string, siteId: string): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const id = _workerNextId++;
-    _workerPending.set(id, { resolve, reject });
-    _radarWorker.postMessage({ type: "fetch", id, key, siteId });
-  });
-}
+import { workerFetch } from "../workers/radarWorkerClient";
 
 interface RadarLayer {
   id: string;

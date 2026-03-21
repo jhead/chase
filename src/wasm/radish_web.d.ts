@@ -13,6 +13,13 @@ export function add_scan(layer_id: string, elevation_angle_deg: number, gate_siz
 export function apply_frame(layer_id: string, key: string): void;
 
 /**
+ * Receive a postcard-encoded `RadarVolume` from the live stream worker.
+ * Updates both the animation frame slot (for immediate texture update) and
+ * sends the volume to Bevy for mesh creation/update.
+ */
+export function apply_live_scan(layer_id: string, site_id: string, bytes: Uint8Array): void;
+
+/**
  * Receive a postcard-encoded `RadarVolume` from the fetch worker and store its
  * first elevation in the frame cache for later playback via `apply_frame`.
  * This replaces `load_frame`.
